@@ -10,4 +10,5 @@ COPY . .
 
 EXPOSE 3001
 
-CMD ["bun", "run", "start"]
+# Run migrations and then start the server
+CMD ["sh", "-c", "bun run db:push && bun run start"]
