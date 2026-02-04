@@ -1,0 +1,127 @@
+services:
+  frontend:
+    image: paperless-frontend:v2026.02.03
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3009:3000"
+    environment:
+      - NUXT_PUBLIC_API_BASE=http://localhost:3001
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - app-network
+
+  backend:
+    image: paperless-backend:v2026.02.03
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    environment:
+      - DB_HOST=db
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - PAPERLESS_API_URL=http://paperless-ngx:8000/api
+      - PAPERLESS_API_TOKEN=${PAPERLESS_TOKEN}
+      - JWT_SECRET=${JWT_SECRET}
+    depends_on:
+      - db
+      - paperless-ngx
+    networks:
+      - app-network
+
+  db:
+    image: mariadb:11
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - app-network
+
+  paperless-ngx:
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+      - gotenberg
+      - tika
+    volumes:
+      - paperless_data:/usr/src/paperless/data
+      - paperless_media:/usr/src/paperless/media
+      - paperless_export:/usr/src/paperless/export
+      - ./consume:/usr/src/paperless/consume
+      - ./scripts:/usr/src/paperless/scripts
+      - ./tmp:/usr/src/paperless/tmp
+    environment:
+      - PAPERLESS_REDIS=redis://redis:6379
+      - PAPERLESS_DBENGINE=mariadb
+      - PAPERLESS_DBHOST=db
+      - PAPERLESS_DBUSER=${DB_USER}
+      - PAPERLESS_DBPASS=${DB_PASSWORD}
+      - PAPERLESS_DBNAME=${DB_NAME}
+      - PAPERLESS_SECRET_KEY=${PAPERLESS_SECRET_KEY}
+      - PAPERLESS_URL=http://paperless-ngx:8000
+      - PAPERLESS_TIKA_ENABLED=1
+      - PAPERLESS_TIKA_GOTENBERG_ENDPOINT=http://gotenberg:3000
+      - PAPERLESS_TIKA_ENDPOINT=http://tika:9998
+      - USERMAP_UID=501
+      - USERMAP_GID=20
+      - PAPERLESS_POST_CONSUME_SCRIPT=/usr/src/paperless/scripts/post-consume.py
+      - PAPERLESS_CONSUMER_RECURSIVE=true
+      - PAPERLESS_CONSUMER_POLLING=10
+      - PAPERLESS_API_TOKEN=${PAPERLESS_TOKEN}
+    networks:
+      - app-network
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+    command:
+      - "gotenberg"
+      - "--chromium-disable-routes=true"
+    networks:
+      - app-network
+
+  tika:
+    image: apache/tika:latest
+    restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  db_data:
+  paperless_data:
+  paperless_media:
+  paperless_export:
+  paperless_consume:
+  redis_data:

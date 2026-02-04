@@ -1,0 +1,42 @@
+import { mysqlTable, serial, varchar, text, timestamp, int, boolean, mysqlEnum } from "drizzle-orm/mysql-core";
+
+export const users = mysqlTable("users", {
+    id: serial("id").primaryKey(),
+    username: varchar("username", { length: 255 }).notNull().unique(),
+    password: varchar("password", { length: 255 }).notNull(), // Hashed password
+    role: mysqlEnum("role", ["admin", "staff", "approver", "user"]).default("user").notNull(),
+});
+
+export const approvals = mysqlTable("approvals", {
+    id: serial("id").primaryKey(),
+    paperless_doc_id: int("paperless_doc_id").notNull(),
+    status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+    actor_id: int("actor_id").references(() => users.id),
+    comment: text("comment"),
+    created_at: timestamp("created_at").defaultNow(),
+});
+
+export const document_tracking = mysqlTable("document_tracking", {
+    id: serial("id").primaryKey(),
+    paperless_id: int("paperless_id").notNull().unique(),
+    uploader_id: int("uploader_id").references(() => users.id),
+    expires_at: timestamp("expires_at"),
+    created_at: timestamp("created_at").defaultNow(),
+});
+
+export const document_permissions = mysqlTable("document_permissions", {
+    id: serial("id").primaryKey(),
+    paperless_id: int("paperless_id").notNull(),
+    user_id: int("user_id").references(() => users.id),
+    can_download: boolean("can_download").default(true).notNull(),
+    created_at: timestamp("created_at").defaultNow(),
+});
+
+export const audit_logs = mysqlTable("audit_logs", {
+    id: serial("id").primaryKey(),
+    user_id: int("user_id"),
+    action: varchar("action", { length: 50 }).notNull(),
+    target_id: varchar("target_id", { length: 255 }),
+    details: text("details"),
+    created_at: timestamp("created_at").defaultNow(),
+});

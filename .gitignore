@@ -1,0 +1,35 @@
+# System Files
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+
+# Environment Variables (Secrets)
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Nuxt / Vue / Build Artifacts
+.nuxt/
+.output/
+dist/
+.cache/
+
+# Docker Volumes & Temp files
+tmp/
+consume/*.pdf
+!consume/.gitkeep
+
+# Paperless Data (if mounted locally)
+backend/db_data/
+paperless_data/
+paperless_media/
+paperless_export/
+
+# Archives
+*.log
+*.pid
