@@ -5,7 +5,7 @@ import { jwt } from '@elysiajs/jwt'
 import { PaperlessService } from './services/paperless'
 import { db } from './db'
 import { approvals, document_tracking, users, document_permissions, audit_logs } from './db/schema'
-import { eq, desc, and, inArray, lt } from 'drizzle-orm'
+import { eq, desc, and, inArray, lt, sql } from 'drizzle-orm'
 
 const app = new Elysia()
     .use(cors({
@@ -678,8 +678,13 @@ console.log(`🦊 Elysia is running at ${app.server?.hostname}:${app.server?.por
 
 // --- Initialization: Seed Admin User ---
 async function seedAdmin() {
+    console.log(`[Init] DB Config Host: ${process.env.DB_HOST || 'localhost'}`);
     try {
         console.log('[Init] Checking for admin user...');
+        // Test connection first
+        await db.execute(sql`SELECT 1`);
+        console.log('[Init] DB Connection Success');
+
         const adminUser = await db.select().from(users).where(eq(users.username, 'admin'));
         if (adminUser.length === 0) {
             console.log('[Init] Creating default admin user (admin/password)...');
@@ -693,12 +698,13 @@ async function seedAdmin() {
         } else {
             console.log('[Init] Admin user already exists.');
         }
-    } catch (e) {
-        console.error('[Init] Error seeding admin:', e);
+    } catch (e: any) {
+        console.error('[Init] Error seeding admin:', e.message);
+        console.error(e);
     }
 }
 
-seedAdmin();
+// seedAdmin().catch(err => console.error('[Init] Fatal Seed Error:', err));
 
 // --- Scheduler: Check for Expired Documents every 1 hour ---
 setInterval(async () => {
