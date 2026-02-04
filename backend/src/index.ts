@@ -8,7 +8,12 @@ import { approvals, document_tracking, users, document_permissions, audit_logs }
 import { eq, desc, and, inArray, lt } from 'drizzle-orm'
 
 const app = new Elysia()
-    .use(cors())
+    .use(cors({
+        origin: true, // Allow all origins (or specify 'https://paperless.bangkhan.com')
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
+        credentials: true
+    }))
     .onError(({ code, error }) => {
         console.error(`[Elysia Error] ${code}:`, error)
     })
@@ -18,8 +23,8 @@ const app = new Elysia()
             secret: process.env.JWT_SECRET || 'secret'
         })
     )
-    .use(authRoutes)
     .group('/api', app => app
+        .use(authRoutes)
         .derive(async ({ jwt, headers, query }) => {
             const auth = headers['authorization']
             let token = ''

@@ -26,7 +26,7 @@ const config = useRuntimeConfig()
 
 async function login() {
   try {
-    const { data, error } = await useFetch(`${config.public.apiBase}/auth/login`, {
+    const { data, error } = await useFetch(`${config.public.apiBase}/api/auth/login`, {
         method: 'POST',
         body: { username: username.value, password: password.value }
     })
