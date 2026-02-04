@@ -27,6 +27,15 @@ const app = new Elysia()
         const { debugConnectivity } = await import('./scripts/debug-paperless');
         return await debugConnectivity();
     })
+    // Fix Icon 404: Redirect /api/_nuxt_icon -> /_nuxt_icon
+    .get('/api/_nuxt_icon/*', ({ params, query, set, path }) => {
+        // Construct the new path by removing /api prefix
+        // path is /api/_nuxt_icon/foo -> /_nuxt_icon/foo
+        const newPath = path.replace('/api', '');
+        const queryString = new URLSearchParams(query as Record<string, string>).toString();
+        const fullDest = queryString ? `${newPath}?${queryString}` : newPath;
+        set.redirect = fullDest;
+    })
     .group('/api', app => app
         .use(authRoutes)
         .derive(async ({ jwt, headers, query }) => {
