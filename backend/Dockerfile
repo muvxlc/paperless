@@ -10,5 +10,5 @@ COPY . .
 
 EXPOSE 3001
 
-# Run migrations, seed default admin, and then start the server
-CMD ["sh", "-c", "bun run db:push && bun run src/scripts/seed.ts && bun run start"]
+# Run migrations and then start the server
+CMD ["sh", "-c", "bun run db:push && bun run start"]

@@ -674,9 +674,31 @@ const app = new Elysia()
     )
     .listen(3001)
 
-console.log(
-    `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
-)
+console.log(`🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`)
+
+// --- Initialization: Seed Admin User ---
+async function seedAdmin() {
+    try {
+        console.log('[Init] Checking for admin user...');
+        const adminUser = await db.select().from(users).where(eq(users.username, 'admin'));
+        if (adminUser.length === 0) {
+            console.log('[Init] Creating default admin user (admin/password)...');
+            const hashedPassword = await Bun.password.hash('password');
+            await db.insert(users).values({
+                username: 'admin',
+                password: hashedPassword,
+                role: 'admin'
+            });
+            console.log('[Init] Admin user created successfully.');
+        } else {
+            console.log('[Init] Admin user already exists.');
+        }
+    } catch (e) {
+        console.error('[Init] Error seeding admin:', e);
+    }
+}
+
+seedAdmin();
 
 // --- Scheduler: Check for Expired Documents every 1 hour ---
 setInterval(async () => {
