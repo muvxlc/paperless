@@ -2,6 +2,23 @@
 
 const PAPERLESS_API_URL = process.env.PAPERLESS_API_URL || 'http://paperless-ngx:8000/api';
 const PAPERLESS_TOKEN = process.env.PAPERLESS_API_TOKEN;
+const PAPERLESS_USERNAME = process.env.PAPERLESS_USERNAME;
+const PAPERLESS_PASSWORD = process.env.PAPERLESS_PASSWORD;
+
+function getHeaders(extraHeaders: Record<string, string> = {}) {
+    const headers: Record<string, string> = { ...extraHeaders };
+
+    if (PAPERLESS_TOKEN && PAPERLESS_TOKEN.trim() !== '' && !PAPERLESS_TOKEN.includes('YOUR_')) {
+        headers['Authorization'] = `Token ${PAPERLESS_TOKEN}`;
+    } else if (PAPERLESS_USERNAME && PAPERLESS_PASSWORD) {
+        const credentials = btoa(`${PAPERLESS_USERNAME}:${PAPERLESS_PASSWORD}`);
+        headers['Authorization'] = `Basic ${credentials}`;
+    } else {
+        console.warn('[PaperlessService] No Token or Credentials found for Paperless API!');
+    }
+
+    return headers;
+}
 
 export const PaperlessService = {
     // Upload a document to Paperless
@@ -17,23 +34,21 @@ export const PaperlessService = {
 
         const response = await fetch(`${PAPERLESS_API_URL}/documents/post_document/`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Token ${PAPERLESS_TOKEN}`,
-            },
+            headers: getHeaders(), // Helper handles Auth
             body: formData,
         });
 
         if (!response.ok) {
-            throw new Error(`Paperless API Error: ${response.statusText}`);
+            throw new Error(`Paperless API Error (Upload): ${response.status} ${response.statusText}`);
         }
 
-        return response.json(); // Usually returns the task ID
+        return response.json();
     },
 
     // Get all tags
     async getTags() {
         const response = await fetch(`${PAPERLESS_API_URL}/tags/`, {
-            headers: { 'Authorization': `Token ${PAPERLESS_TOKEN}` }
+            headers: getHeaders()
         });
         if (!response.ok) return { results: [] };
         return response.json();
@@ -43,10 +58,7 @@ export const PaperlessService = {
     async createTag(name: string) {
         const response = await fetch(`${PAPERLESS_API_URL}/tags/`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Token ${PAPERLESS_TOKEN}`,
-                'Content-Type': 'application/json'
-            },
+            headers: getHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ name, color: '#c0c0c0', is_inbox_tag: false })
         });
         if (!response.ok) throw new Error(`Failed to create tag: ${response.statusText}`);
@@ -56,7 +68,7 @@ export const PaperlessService = {
     // Get ID of a tag by name, creating it if it doesn't exist
     async getOrCreateTag(name: string): Promise<number> {
         const tagsData = await this.getTags();
-        const existing = tagsData.results.find((t: any) => t.name.toLowerCase() === name.toLowerCase());
+        const existing = tagsData?.results?.find((t: any) => t.name.toLowerCase() === name.toLowerCase());
 
         if (existing) return existing.id;
 
@@ -67,19 +79,19 @@ export const PaperlessService = {
     // Get documents (can filter by query)
     async getDocuments(query: string = '') {
         const response = await fetch(`${PAPERLESS_API_URL}/documents/?query=${encodeURIComponent(query)}`, {
-            headers: {
-                'Authorization': `Token ${PAPERLESS_TOKEN}`,
-            },
+            headers: getHeaders(),
         });
+        if (!response.ok) {
+            const txt = await response.text();
+            throw new Error(`Paperless API Error (GetDocs): ${response.status} ${txt}`);
+        }
         return response.json();
     },
 
     // Get documents by Tag ID
     async getDocumentsByTag(tagId: number) {
         const response = await fetch(`${PAPERLESS_API_URL}/documents/?tags__id__all=${tagId}`, {
-            headers: {
-                'Authorization': `Token ${PAPERLESS_TOKEN}`,
-            },
+            headers: getHeaders(),
         });
         if (!response.ok) throw new Error(`Failed to fetch docs by tag: ${response.statusText}`);
         return response.json();
@@ -89,16 +101,11 @@ export const PaperlessService = {
     async updateDocument(id: number, data: any) {
         const response = await fetch(`${PAPERLESS_API_URL}/documents/${id}/`, {
             method: 'PATCH',
-            headers: {
-                'Authorization': `Token ${PAPERLESS_TOKEN}`,
-                'Content-Type': 'application/json',
-            },
+            headers: getHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(data),
         });
 
         if (!response.ok) {
-            // Paperless sometimes returns 200 for success, sometimes 204
-            // If not OK, throw
             throw new Error(`Failed to update document: ${response.statusText}`);
         }
         return response.json();
@@ -107,7 +114,7 @@ export const PaperlessService = {
     // Get document by ID to see current tags
     async getDocument(id: number) {
         const response = await fetch(`${PAPERLESS_API_URL}/documents/${id}/`, {
-            headers: { 'Authorization': `Token ${PAPERLESS_TOKEN}` }
+            headers: getHeaders()
         });
         if (!response.ok) throw new Error('Document not found');
         return response.json();
@@ -121,7 +128,7 @@ export const PaperlessService = {
     // Download a document
     async downloadDocument(id: number) {
         const response = await fetch(`${PAPERLESS_API_URL}/documents/${id}/download/`, {
-            headers: { 'Authorization': `Token ${PAPERLESS_TOKEN}` }
+            headers: getHeaders()
         });
         if (!response.ok) throw new Error('Failed to download document');
         return response; // Return the full response so we can stream it
