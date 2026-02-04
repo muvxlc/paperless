@@ -221,12 +221,21 @@ const app = new Elysia()
                     })
                 }
 
+                // Fetch Usernames for Audit Log
+                let approvedForNames = 'None';
+                if (userIds && userIds.length > 0) {
+                    const approvedUsers = await db.select({ username: users.username })
+                        .from(users)
+                        .where(inArray(users.id, userIds));
+                    approvedForNames = approvedUsers.map(u => u.username).join(', ');
+                }
+
                 // Audit Log: APPROVE
                 await db.insert(audit_logs).values({
                     user_id: user.id as number,
                     action: 'APPROVE',
                     target_id: String(docId),
-                    details: `Approved by ${user.username}. Expiration: ${expirationDays || 'None'}, Download: ${canDownload}`
+                    details: `Document: "${doc.title}". Approved for: [${approvedForNames}]. By: ${user.username}. Expiration: ${expirationDays || 'None'}, Download: ${canDownload}`
                 })
 
                 // Save Permissions
