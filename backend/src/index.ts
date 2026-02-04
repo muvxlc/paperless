@@ -541,13 +541,43 @@ const app = new Elysia()
                 headers: { 'Content-Type': 'text/html' }
             });
         })
-        // Audit Logs (Admin Only)
-        .get('/logs', async ({ user, set }: any) => {
+        // Audit Logs (Admin Only) - with Search & Pagination
+        .get('/logs', async ({ user, set, query }: any) => {
             if (user?.role !== 'admin') {
                 set.status = 403; return 'Forbidden';
             }
 
+            const page = Number(query.page) || 1;
+            const limit = Number(query.limit) || 20;
+            const offset = (page - 1) * limit;
+            const q = query.q as string || '';
+
             try {
+                // Build Filter
+                const searchFilters = [];
+                if (q) {
+                    const searchStr = `%${q}%`;
+                    searchFilters.push(sql`${users.username} LIKE ${searchStr}`);
+                    searchFilters.push(sql`${audit_logs.action} LIKE ${searchStr}`);
+                    searchFilters.push(sql`${audit_logs.details} LIKE ${searchStr}`);
+                    searchFilters.push(sql`${audit_logs.target_id} LIKE ${searchStr}`);
+                }
+
+                // Base Query Condition
+                let whereCondition = undefined;
+                if (searchFilters.length > 0) {
+                    whereCondition = sql`(${sql.join(searchFilters, sql` OR `)})`;
+                }
+
+                // Get Total Count
+                const countResult = await db.select({ count: sql<number>`count(*)` })
+                    .from(audit_logs)
+                    .leftJoin(users, eq(audit_logs.user_id, users.id))
+                    .where(whereCondition);
+
+                const total = countResult[0].count;
+
+                // Get Data
                 const logs = await db.select({
                     id: audit_logs.id,
                     username: users.username,
@@ -558,10 +588,20 @@ const app = new Elysia()
                 })
                     .from(audit_logs)
                     .leftJoin(users, eq(audit_logs.user_id, users.id))
+                    .where(whereCondition)
                     .orderBy(desc(audit_logs.created_at))
-                    .limit(100);
+                    .limit(limit)
+                    .offset(offset);
 
-                return logs;
+                return {
+                    data: logs,
+                    meta: {
+                        total,
+                        page,
+                        limit,
+                        total_pages: Math.ceil(total / limit)
+                    }
+                };
             } catch (e: any) {
                 set.status = 500; return { error: e.message }
             }

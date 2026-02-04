@@ -2,7 +2,10 @@
   <div class="p-8">
     <div class="flex justify-between items-center mb-6">
       <h1 class="text-2xl font-bold">System Audit Logs</h1>
-      <UButton icon="i-heroicons-arrow-path" color="gray" variant="ghost" @click="fetchLogs" :loading="pending" />
+      <div class="flex gap-4">
+        <UInput v-model="q" placeholder="Search logs..." icon="i-heroicons-magnifying-glass" class="w-64" @keyup.enter="fetchLogs" />
+        <UButton icon="i-heroicons-arrow-path" color="gray" variant="ghost" @click="fetchLogs" :loading="pending" />
+      </div>
     </div>
 
     <UCard>
@@ -14,6 +17,10 @@
             <UBadge :color="getActionColor(row.action)" variant="soft">{{ row.action }}</UBadge>
         </template>
       </UTable>
+
+      <div class="flex justify-end p-4 border-t border-gray-200 dark:border-gray-700">
+        <UPagination v-model="page" :page-count="pageCount" :total="total" />
+      </div>
     </UCard>
   </div>
 </template>
@@ -23,6 +30,12 @@ const config = useRuntimeConfig()
 const auth = useAuthStore()
 const logs = ref([])
 const pending = ref(false)
+
+// Pagination & Search
+const page = ref(1)
+const pageCount = ref(20)
+const total = ref(0)
+const q = ref('')
 
 const columns = [
   { key: 'created_at', label: 'Time' },
@@ -52,10 +65,23 @@ function formatTimestamp(ts) {
 async function fetchLogs() {
   pending.value = true
   try {
-    const data = await $fetch(`${config.public.apiBase}/api/logs`, {
-        headers: { 'Authorization': `Bearer ${auth.token}` }
+    const response = await $fetch(`${config.public.apiBase}/api/logs`, {
+        headers: { 'Authorization': `Bearer ${auth.token}` },
+        params: {
+            page: page.value,
+            limit: pageCount.value,
+            q: q.value
+        }
     })
-    logs.value = data || []
+    
+    // Handle response structure { data, meta }
+    if (response.data) {
+        logs.value = response.data
+        total.value = response.meta.total
+    } else {
+        logs.value = response // Fallback/Legacy
+    }
+
   } catch (err) {
     if (err.data === 'Forbidden') {
         navigateTo('/')
@@ -66,6 +92,21 @@ async function fetchLogs() {
     pending.value = false
   }
 }
+
+// Watchers
+watch(page, () => {
+    fetchLogs()
+})
+
+// Debounce Search
+let timeout = null
+watch(q, () => {
+    clearTimeout(timeout)
+    timeout = setTimeout(() => {
+        page.value = 1 // Reset to page 1 on search
+        fetchLogs()
+    }, 500)
+})
 
 onMounted(() => {
     fetchLogs()
