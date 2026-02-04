@@ -1,5 +1,7 @@
 import mysql from "mysql2/promise";
-import { Bun } from "bun"; // Import Bun for password hashing
+import mysql from "mysql2/promise";
+
+declare var Bun: any; // Declare global for TS (runtime uses global Bun)
 
 async function initDB() {
     console.log(`[Init] Connecting to DB Host: ${process.env.DB_HOST || 'localhost'}...`);
