@@ -65,7 +65,7 @@ services:
       - paperless_export:/usr/src/paperless/export
       - ./consume:/usr/src/paperless/consume
       - ./scripts:/usr/src/paperless/scripts
-      - ./tmp:/usr/src/paperless/tmp
+      - paperless_tmp:/usr/src/paperless/tmp
     environment:
       - PAPERLESS_REDIS=redis://redis:6379
       - PAPERLESS_DBENGINE=mariadb
@@ -126,3 +126,4 @@ volumes:
   paperless_export:
   paperless_consume:
   redis_data:
+  paperless_tmp:
