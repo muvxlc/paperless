@@ -23,6 +23,10 @@ const app = new Elysia()
             secret: process.env.JWT_SECRET || 'secret'
         })
     )
+    .get('/api/debug', async () => {
+        const { debugConnectivity } = await import('./scripts/debug-paperless');
+        return await debugConnectivity();
+    })
     .group('/api', app => app
         .use(authRoutes)
         .derive(async ({ jwt, headers, query }) => {
@@ -671,12 +675,8 @@ const app = new Elysia()
                 }
             })
         )
-        // Debug
-        .get('/debug', async () => {
-            const { debugConnectivity } = await import('./scripts/debug-paperless');
-            return await debugConnectivity();
-        })
     )
+
     .listen(3001)
 
 console.log(`🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`)
