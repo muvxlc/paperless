@@ -65,7 +65,6 @@ services:
       - paperless_export:/usr/src/paperless/export
       - ./consume:/usr/src/paperless/consume
       - ./scripts:/usr/src/paperless/scripts
-      - paperless_tmp:/usr/src/paperless/tmp
     environment:
       - PAPERLESS_REDIS=redis://redis:6379
       - PAPERLESS_DBENGINE=mariadb
@@ -86,7 +85,6 @@ services:
       - PAPERLESS_CONSUMER_RECURSIVE=true
       - PAPERLESS_CONSUMER_POLLING=10
       - PAPERLESS_API_TOKEN=${PAPERLESS_TOKEN}
-      - TMPDIR=/usr/src/paperless/tmp
       - PAPERLESS_ADMIN_USER=${PAPERLESS_ADMIN_USER:-admin}
       - PAPERLESS_ADMIN_PASSWORD=${PAPERLESS_ADMIN_PASSWORD:-password}
     networks:
@@ -126,4 +124,3 @@ volumes:
   paperless_export:
   paperless_consume:
   redis_data:
-  paperless_tmp:
