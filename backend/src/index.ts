@@ -671,6 +671,11 @@ const app = new Elysia()
                 }
             })
         )
+        // Debug
+        .get('/debug', async () => {
+            const { debugConnectivity } = await import('./scripts/debug-paperless');
+            return await debugConnectivity();
+        })
     )
     .listen(3001)
 
