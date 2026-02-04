@@ -7,6 +7,7 @@
     "start": "bun run src/index.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
+    "db:init": "bun run src/scripts/init-db.ts",
     "create-admin": "bun run src/scripts/create-admin.ts"
   },
   "dependencies": {
