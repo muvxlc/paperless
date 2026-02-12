@@ -76,26 +76,42 @@ const app = new Elysia()
 
                 // Upload with Tag
                 const result = await PaperlessService.uploadDocument(file, title, [pendingTagId]);
+                console.log('[Upload] Paperless Response:', result);
 
-                // Track uploader
-                if (result.document_id || result.taskId) {
-                    // Note: Paperless post_document might return taskId or document_id depending on version/async
-                    // If it's taskId, we might not have the doc ID yet. 
-                    // But for now let's hope it returns something we can use.
-                    // If not, we might need to poll. 
-                    // For simplified MVP, let's assume result has what we need or just continue.
+                // Paperless might return a task_id (async) or a document (sync)
+                // If it returns a task_id, we store it and poll later.
+                // NOTE: Paperless post_document often returns just the UUID string (Task ID)
+
+                let taskId = undefined;
+                let docId = undefined;
+
+                if (typeof result === 'string') {
+                    taskId = result;
+                } else {
+                    taskId = result.task_id;
+                    docId = result.document;
                 }
 
-                // If Paperless returns the ID immediately (synchronous), use it
-                const paperlessDocId = result.document_id;
-                if (paperlessDocId && user?.id) {
+                if (taskId) {
                     await db.insert(document_tracking).values({
-                        paperless_id: paperlessDocId,
+                        task_id: taskId,
+                        uploader_id: user.id as number
+                    })
+                } else if (docId) {
+                    await db.insert(document_tracking).values({
+                        paperless_id: docId,
                         uploader_id: user.id as number
                     })
                 }
 
-                return { success: true, result }
+                return {
+                    success: true,
+                    result: {
+                        task_id: taskId,
+                        document_id: docId,
+                        original_response: result
+                    }
+                }
             } catch (e: any) {
                 set.status = 500
                 return { error: e.message }
@@ -105,6 +121,28 @@ const app = new Elysia()
                 file: t.File(),
                 title: t.Optional(t.String())
             })
+        })
+        // Staff: Check Task Status
+        .get('/tasks/:taskId', async ({ params, user, set }) => {
+            if (user?.role !== 'staff' && user?.role !== 'admin') {
+                set.status = 403
+                return 'Forbidden'
+            }
+            try {
+                const status = await PaperlessService.getTaskStatus(params.taskId);
+
+                // If success, update DB with document ID
+                if (status.status === 'SUCCESS' && status.related_document) {
+                    await db.update(document_tracking)
+                        .set({ paperless_id: status.related_document })
+                        .where(eq(document_tracking.task_id, params.taskId));
+                }
+
+                return status;
+            } catch (e: any) {
+                set.status = 500
+                return { error: e.message }
+            }
         })
         // Approver: List Pending
         .get('/pending', async ({ user, set }) => {

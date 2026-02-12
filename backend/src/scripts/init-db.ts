@@ -1,5 +1,5 @@
 import mysql from "mysql2/promise";
-import mysql from "mysql2/promise";
+
 
 declare var Bun: any; // Declare global for TS (runtime uses global Bun)
 
@@ -47,7 +47,8 @@ async function initDB() {
         await connection.execute(`
             CREATE TABLE IF NOT EXISTS document_tracking (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                paperless_id INT NOT NULL UNIQUE,
+                paperless_id INT UNIQUE,
+                task_id VARCHAR(255) UNIQUE,
                 uploader_id BIGINT UNSIGNED,
                 expires_at TIMESTAMP NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -55,6 +56,23 @@ async function initDB() {
             );
         `);
         console.log(" - Checked/Created table: document_tracking");
+
+        // Migration: Add task_id if not exists
+        try {
+            await connection.execute(`
+                SELECT task_id FROM document_tracking LIMIT 1;
+            `);
+        } catch (e: any) {
+            if (e.code === 'ER_BAD_FIELD_ERROR') {
+                console.log(" - Migrating: Adding task_id to document_tracking...");
+                await connection.execute(`
+                    ALTER TABLE document_tracking 
+                    ADD COLUMN task_id VARCHAR(255) UNIQUE AFTER paperless_id,
+                    MODIFY COLUMN paperless_id INT NULL; 
+                `);
+                console.log(" - Migration complete.");
+            }
+        }
 
         // 4. Document Permissions
         await connection.execute(`

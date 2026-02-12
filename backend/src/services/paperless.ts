@@ -132,5 +132,20 @@ export const PaperlessService = {
         });
         if (!response.ok) throw new Error('Failed to download document');
         return response; // Return the full response so we can stream it
+    },
+
+    // Get Task Status
+    async getTaskStatus(taskId: string) {
+        const response = await fetch(`${PAPERLESS_API_URL}/tasks/?task_id=${taskId}`, {
+            headers: getHeaders()
+        });
+        if (!response.ok) throw new Error('Failed to get task status');
+
+        const data = await response.json();
+        // Paperless filter query usually returns a list
+        if (Array.isArray(data)) {
+            return data.length > 0 ? data[0] : { status: 'UNKNOWN', result: 'No task found' };
+        }
+        return data;
     }
 };

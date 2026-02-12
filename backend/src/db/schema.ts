@@ -18,7 +18,8 @@ export const approvals = mysqlTable("approvals", {
 
 export const document_tracking = mysqlTable("document_tracking", {
     id: serial("id").primaryKey(),
-    paperless_id: int("paperless_id").notNull().unique(),
+    paperless_id: int("paperless_id").unique(), // Nullable now, as we might only have task_id initially
+    task_id: varchar("task_id", { length: 255 }).unique(), // Paperless Task ID
     uploader_id: int("uploader_id").references(() => users.id),
     expires_at: timestamp("expires_at"),
     created_at: timestamp("created_at").defaultNow(),
