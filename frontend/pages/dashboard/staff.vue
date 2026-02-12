@@ -89,7 +89,7 @@ function statusColor(status) {
 }
 
 async function uploadAll() {
-    const CONCURRENCY = 3; // Upload 3 files at a time
+    const CONCURRENCY = 5; // Optimized for 4-Core Server
     const queue = uploadQueue.value.filter(item => item.status !== 'success');
     
     // Helper to process a chunk
