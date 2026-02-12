@@ -8,5 +8,5 @@ export default defineNuxtConfig({
     ui: {
         global: true,
     },
-    devtools: { enabled: true }
+    devtools: { enabled: false }
 })

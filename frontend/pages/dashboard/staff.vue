@@ -89,10 +89,20 @@ function statusColor(status) {
 }
 
 async function uploadAll() {
-    for (const item of uploadQueue.value) {
-        if (item.status === 'success') continue;
-        await processItem(item)
-    }
+    const CONCURRENCY = 3; // Upload 3 files at a time
+    const queue = uploadQueue.value.filter(item => item.status !== 'success');
+    
+    // Helper to process a chunk
+    const worker = async () => {
+        while (queue.length > 0) {
+            const item = queue.shift();
+            if (item) await processItem(item);
+        }
+    };
+
+    // Create worker pool
+    const workers = Array(Math.min(queue.length, CONCURRENCY)).fill(null).map(() => worker());
+    await Promise.all(workers);
 }
 
 async function processItem(item) {
@@ -104,83 +114,86 @@ async function processItem(item) {
     formData.append('title', item.file.name.replace(/\.[^/.]+$/, "")) // Remove extension for title
 
     try {
-        const { data, error } = await useFetch(`${config.public.apiBase}/api/upload`, {
+        const data = await $fetch(`${config.public.apiBase}/api/upload`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${auth.token}` },
             body: formData
         })
 
-        if (error.value) {
-            item.status = 'error'
-            item.message = error.value.data?.error || error.value.message
-            return
-        }
-
-        const result = data.value.result
+        const result = data.result
         
         if (result.task_id) {
             item.taskId = result.task_id
             item.status = 'processing'
             item.message = 'Processing in Paperless...'
-            pollTaskStatus(item)
+            // Await the local polling promise
+            await pollTaskStatus(item)
         } else if (result.document_id || result.document || result.id) {
              item.status = 'success'
              item.message = 'Upload Complete'
         } else {
-             // Unclear result but no error?
              item.status = 'success'
              item.message = 'Uploaded (Async)'
         }
 
     } catch (e) {
         item.status = 'error'
-        item.message = 'Upload failed'
+        item.message = e.data?.error || e.message || 'Upload failed'
     }
 }
 
-async function pollTaskStatus(item) {
-    if (!item.taskId) return;
-    
-    const maxRetries = 100; // Increased to allow for queueing time (approx 5 mins)
-    let attempts = 0;
-    
-    const poll = async () => {
-        if (attempts >= maxRetries) {
-            item.status = 'error'
-            item.message = 'Processing timed out'
-            return
+function pollTaskStatus(item) {
+    return new Promise((resolve) => {
+        if (!item.taskId) {
+            resolve();
+            return;
         }
         
-        try {
-             const { data, error } = await useFetch(`${config.public.apiBase}/api/tasks/${item.taskId}`, {
-                headers: { 'Authorization': `Bearer ${auth.token}` }
-            })
+        const maxRetries = 1200; // approx 60 mins (to handle large backlogs)
+        let attempts = 0;
+        
+        const poll = async () => {
+            if (attempts >= maxRetries) {
+                item.status = 'error'
+                item.message = 'Processing timed out (Backlog too large)'
+                resolve();
+                return
+            }
             
-            if (error.value) {
-                 // Maybe network error, retry?
-                 console.error('Poll error', error.value)
-            } else {
-                const status = data.value.status // e.g. SUCCESS, FAILURE, INTEGTITY_ERROR...
+            try {
+                 const data = await $fetch(`${config.public.apiBase}/api/tasks/${item.taskId}`, {
+                    headers: { 'Authorization': `Bearer ${auth.token}` }
+                })
+                
+                const status = data.status
                 
                 if (status === 'SUCCESS') {
                     item.status = 'success'
                     item.message = 'Processing Complete'
+                    resolve();
                     return
                 } else if (status === 'FAILURE') {
                     item.status = 'error'
-                    item.message = `Processing Failed: ${data.value.result}`
+                    item.message = `Processing Failed: ${data.result}`
+                    resolve();
                     return
+                } else if (status === 'PENDING') {
+                    item.message = `Queued (${attempts}s)...`
+                } else if (status === 'STARTED') {
+                    item.message = 'Processing document...'
                 }
+                
+                attempts++;
+                setTimeout(poll, 3000)
+                
+            } catch (e) {
+                console.error('Polling exception', e)
+                attempts++;
+                setTimeout(poll, 3000)
             }
-            
-            attempts++;
-            setTimeout(poll, 3000) // Poll every 3s
-            
-        } catch (e) {
-            console.error('Polling exception', e)
         }
-    }
-    
-    poll()
+        
+        poll()
+    });
 }
 </script>
