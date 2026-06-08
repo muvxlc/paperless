@@ -145,7 +145,12 @@
                       <div class="mt-1 flex items-center space-x-2">
                         <span v-if="item.status === 'success'" class="text-xs text-green-500 dark:text-green-400 flex items-center font-medium">
                           <UIcon name="i-heroicons-check-circle" class="w-4 h-4 mr-1 flex-shrink-0" />
-                          Uploaded successfully
+                          <span v-if="item.warning" class="text-amber-500 dark:text-amber-400">
+                            Uploaded. {{ item.warning }}
+                          </span>
+                          <span v-else>
+                            Uploaded successfully
+                          </span>
                         </span>
                         <span v-else-if="item.status === 'processing'" class="text-xs text-orange-500 dark:text-orange-400 flex items-center font-medium">
                           <UIcon name="i-heroicons-arrow-path" class="w-4 h-4 mr-1 animate-spin flex-shrink-0" />
@@ -329,7 +334,7 @@ async function uploadSingle(item) {
 
 // Poll Paperless-ngx task queue for the document processing status
 async function pollTaskStatus(item, taskId) {
-  const maxRetries = 60 // 120 seconds maximum polling time
+  const maxRetries = 90 // 180 seconds maximum polling time
   let retries = 0
   
   while (retries < maxRetries) {
@@ -361,9 +366,10 @@ async function pollTaskStatus(item, taskId) {
     await new Promise(resolve => setTimeout(resolve, 2000)) // Poll every 2 seconds
   }
   
-  item.status = 'failed'
-  item.error = 'Processing timeout. Document is likely still processing in the background.'
-  return false
+  // Timeout: mark as success with warning since the file upload did succeed, just background OCR took too long
+  item.status = 'success'
+  item.warning = 'Processing timeout. Document is likely still processing in the background.'
+  return true
 }
 
 // Upload all files in the queue sequentially

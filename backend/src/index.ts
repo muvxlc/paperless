@@ -107,6 +107,17 @@ const app = new Elysia()
                     })
                 }
 
+                // Log Audit Event: UPLOAD
+                if (user?.id) {
+                    const targetId = paperlessDocId ? String(paperlessDocId) : (typeof result === 'string' ? result : (result.taskId || result.task_id || 'Unknown'));
+                    await db.insert(audit_logs).values({
+                        user_id: user.id as number,
+                        action: 'UPLOAD',
+                        target_id: targetId,
+                        details: `Uploaded document: "${title || 'Untitled'}". Uploader: ${user.username}`
+                    });
+                }
+
                 return { success: true, result }
             } catch (e: any) {
                 set.status = 500
@@ -202,12 +213,12 @@ const app = new Elysia()
                 const page = Number(query.page) || 1;
                 const pageSize = Number(query.limit) || Number(query.pageSize) || 12;
 
-                const pendingTagId = await PaperlessService.getOrCreateTag('Pending');
+                // Build search query exactly like the approve system
+                const searchQuery = search ? `tag:Pending ${search}` : 'tag:Pending';
                 
                 // Fetch paginated, searched documents with tag 'Pending'
                 const docs = await PaperlessService.getDocumentsAdvanced({
-                    tagId: pendingTagId,
-                    query: search || undefined,
+                    query: searchQuery,
                     page,
                     page_size: pageSize
                 });
