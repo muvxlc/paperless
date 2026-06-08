@@ -116,7 +116,7 @@ const app = new Elysia()
             const taskId = params.taskId
             try {
                 const data = await PaperlessService.getTaskStatus(taskId)
-                const task = data.results && data.results[0]
+                const task = Array.isArray(data) ? data[0] : (data.results && data.results[0])
 
                 if (task) {
                     // Task status in Paperless: PENDING, STARTED, SUCCESS, FAILURE, REVOKED
