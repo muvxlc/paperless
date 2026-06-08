@@ -334,10 +334,12 @@ async function uploadSingle(item) {
 
 // Poll Paperless-ngx task queue for the document processing status
 async function pollTaskStatus(item, taskId) {
-  const maxRetries = 90 // 180 seconds maximum polling time
+  const maxFastRetries = 90 // 180 seconds maximum polling time (every 2 seconds)
+  const maxSlowRetries = 30 // Another 300 seconds maximum polling time (every 10 seconds)
   let retries = 0
   
-  while (retries < maxRetries) {
+  // Phase 1: Fast Polling (every 2 seconds for 3 minutes)
+  while (retries < maxFastRetries) {
     try {
       const response = await $fetch(`${config.public.apiBase}/api/upload/status/${taskId}`, {
         headers: {
@@ -348,6 +350,7 @@ async function pollTaskStatus(item, taskId) {
       // Paperless statuses: PENDING, STARTED, SUCCESS, FAILURE, REVOKED
       if (response.status === 'SUCCESS') {
         item.status = 'success'
+        item.warning = ''
         return true
       } else if (response.status === 'FAILURE') {
         item.status = 'failed'
@@ -366,9 +369,44 @@ async function pollTaskStatus(item, taskId) {
     await new Promise(resolve => setTimeout(resolve, 2000)) // Poll every 2 seconds
   }
   
-  // Timeout: mark as success with warning since the file upload did succeed, just background OCR took too long
+  // Phase 2: Transition to Slow Polling (every 10 seconds for another 5 minutes)
+  item.warning = 'Taking longer than expected. Still checking in the background...'
+  retries = 0
+  
+  while (retries < maxSlowRetries) {
+    try {
+      const response = await $fetch(`${config.public.apiBase}/api/upload/status/${taskId}`, {
+        headers: {
+          'Authorization': `Bearer ${auth.token}`
+        }
+      })
+      
+      if (response.status === 'SUCCESS') {
+        item.status = 'success'
+        item.warning = ''
+        return true
+      } else if (response.status === 'FAILURE') {
+        item.status = 'failed'
+        item.warning = ''
+        item.error = response.error || 'OCR processing failed'
+        return false
+      } else if (response.status === 'REVOKED') {
+        item.status = 'failed'
+        item.warning = ''
+        item.error = 'Task was revoked'
+        return false
+      }
+    } catch (err) {
+      console.error('Error polling status for task:', taskId, err)
+    }
+    
+    retries++
+    await new Promise(resolve => setTimeout(resolve, 10000)) // Poll every 10 seconds
+  }
+  
+  // Phase 3: Absolute timeout (8 minutes total) - assume success in background
   item.status = 'success'
-  item.warning = 'Processing timeout. Document is likely still processing in the background.'
+  item.warning = 'Processing timeout. Document is likely still processing in the background. Check Paperless task logs for final status.'
   return true
 }
 
