@@ -81,13 +81,26 @@ const app = new Elysia()
 
             const file = body.file as Blob
             const title = body.title as string
+            const tagsInput = body.tags as string || ''
 
             try {
                 // Ensure 'Pending' tag exists
                 const pendingTagId = await PaperlessService.getOrCreateTag('Pending');
+                const tagIds = [pendingTagId];
 
-                // Upload with Tag
-                const result = await PaperlessService.uploadDocument(file, title, [pendingTagId]);
+                // Process custom tags if provided
+                if (tagsInput) {
+                    const tagNames = tagsInput.split(',').map(t => t.trim()).filter(Boolean);
+                    for (const name of tagNames) {
+                        const tagId = await PaperlessService.getOrCreateTag(name);
+                        if (!tagIds.includes(tagId)) {
+                            tagIds.push(tagId);
+                        }
+                    }
+                }
+
+                // Upload with Tags
+                const result = await PaperlessService.uploadDocument(file, title, tagIds);
 
                 // Track uploader
                 if (result.document_id || result.taskId) {
@@ -126,7 +139,8 @@ const app = new Elysia()
         }, {
             body: t.Object({
                 file: t.File(),
-                title: t.Optional(t.String())
+                title: t.Optional(t.String()),
+                tags: t.Optional(t.String())
             })
         })
         // Staff: Get task status

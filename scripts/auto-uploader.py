@@ -14,7 +14,7 @@ API_BASE_URL = os.environ.get("PAPERLESS_URL", "https://paperless.bangkhan.com")
 USERNAME = os.environ.get("UPLOAD_USER", "staff1")
 PASSWORD = os.environ.get("UPLOAD_PASSWORD", "password")
 # Directory where files are scanned and mounted (e.g., /Volumes/192.168.100.119/ปี 2569)
-SCAN_DIR = os.environ.get("SCAN_DIR", "/Volumes/192.168.100.119/ปี 2569")
+SCAN_DIR = os.environ.get("SCAN_DIR", "/Users/kittisak.s/Documents/chart/ปี 2569")
 # Local tracker file path
 TRACKER_FILE = os.environ.get("TRACKER_FILE", "uploaded_tracker.json")
 
@@ -98,18 +98,23 @@ def upload_document(token, filepath, title):
     
     filename = f"{title}.pdf"
     
+    # Extract first 2 digits of the title as the prefix tag (e.g. 69 from 690000011)
+    prefix_tag = title[:2] if len(title) >= 2 else ""
+    custom_tags = f"{prefix_tag},Pending" if prefix_tag else "Pending"
+    
     try:
         with open(filepath, 'rb') as f:
             files = {
                 'file': (filename, f, 'application/pdf')
             }
             data = {
-                'title': title
+                'title': title,
+                'tags': custom_tags
             }
             response = requests.post(url, headers=headers, files=files, data=data)
             
             if response.status_code == 200:
-                log(f"Successfully uploaded: {filepath} -> Title: {title}")
+                log(f"Successfully uploaded: {filepath} -> Title: {title} with tags: {custom_tags}")
                 return True
             else:
                 log(f"Failed to upload {filepath}. Status: {response.status_code}, Response: {response.text}")
