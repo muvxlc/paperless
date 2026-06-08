@@ -1,18 +1,24 @@
 <template>
-  <div class="flex items-center justify-center min-h-screen bg-gray-100">
-    <UCard class="w-full max-w-sm">
+  <div class="flex items-center justify-center min-h-screen w-full bg-gradient-to-br from-amber-50/60 to-orange-100/40 dark:from-gray-950 dark:to-gray-900 p-4">
+    <UCard class="w-full max-w-md shadow-lg ring-1 ring-gray-100 dark:ring-gray-800 rounded-3xl p-4">
       <template #header>
-        <h1 class="text-xl font-semibold">Login</h1>
+        <div class="text-center py-4">
+          <span class="text-4xl">👋</span>
+          <h1 class="text-2xl font-bold text-gray-950 dark:text-white mt-3">Welcome to Paperless</h1>
+          <p class="text-xs text-gray-400 mt-1">Please enter your credentials to login</p>
+        </div>
       </template>
 
-      <div class="space-y-4">
+      <div class="space-y-5">
         <UFormGroup label="Username">
-          <UInput v-model="username" />
+          <UInput v-model="username" icon="i-heroicons-user" placeholder="Enter username" size="lg" />
         </UFormGroup>
         <UFormGroup label="Password">
-          <UInput v-model="password" type="password" />
+          <UInput v-model="password" type="password" icon="i-heroicons-key" placeholder="Enter password" size="lg" />
         </UFormGroup>
-        <UButton block @click="login">Login</UButton>
+        <UButton block color="primary" size="lg" @click="login" class="mt-6 rounded-xl font-bold">
+          Login
+        </UButton>
       </div>
     </UCard>
   </div>
