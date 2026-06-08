@@ -143,9 +143,9 @@
                       
                       <!-- Progress bar or title / status info -->
                       <div class="mt-1 flex items-center space-x-2">
-                        <span v-if="item.status === 'success'" class="text-xs text-green-500 dark:text-green-400 flex items-center font-medium">
-                          <UIcon name="i-heroicons-check-circle" class="w-4 h-4 mr-1 flex-shrink-0" />
-                          <span v-if="item.warning" class="text-amber-500 dark:text-amber-400">
+                        <span v-if="item.status === 'success'" :class="item.warning ? 'text-amber-500 dark:text-amber-400' : 'text-green-500 dark:text-green-400'" class="text-xs flex items-center font-medium">
+                          <UIcon :name="item.warning ? 'i-heroicons-clock' : 'i-heroicons-check-circle'" class="w-4 h-4 mr-1 flex-shrink-0" />
+                          <span v-if="item.warning">
                             Uploaded. {{ item.warning }}
                           </span>
                           <span v-else>
@@ -184,8 +184,8 @@
                     />
                     <UIcon 
                       v-else-if="item.status === 'success'" 
-                      name="i-heroicons-check-badge" 
-                      class="w-6 h-6 text-green-500" 
+                      :name="item.warning ? 'i-heroicons-clock' : 'i-heroicons-check-badge'" 
+                      :class="['w-6 h-6', item.warning ? 'text-amber-500' : 'text-green-500']" 
                     />
                     <UButton 
                       v-else-if="item.status === 'failed'" 
@@ -406,7 +406,57 @@ async function pollTaskStatus(item, taskId) {
   
   // Phase 3: Absolute timeout (8 minutes total) - assume success in background
   item.status = 'success'
-  item.warning = 'Processing timeout. Document is likely still processing in the background. Check Paperless task logs for final status.'
+  item.warning = 'Processing timeout...'
+  
+  // Phase 4: Silent background polling (every 30 seconds for another 30 minutes)
+  // This handles the case "what if it reports error or success later"
+  // Run it asynchronously so we don't block the caller from returning true (success status)
+  (async () => {
+    let silentRetries = 0
+    const maxSilentRetries = 60
+    while (silentRetries < maxSilentRetries) {
+      // Only continue polling if the item is still in 'success' status and has the timeout warning.
+      if (item.status !== 'success' || item.warning !== 'Processing timeout...') {
+        return
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 30000)) // Poll every 30 seconds
+
+      // Check again if status or warning has changed during the wait
+      if (item.status !== 'success' || item.warning !== 'Processing timeout...') {
+        return
+      }
+
+      try {
+        const response = await $fetch(`${config.public.apiBase}/api/upload/status/${taskId}`, {
+          headers: {
+            'Authorization': `Bearer ${auth.token}`
+          }
+        })
+
+        if (response.status === 'SUCCESS') {
+          item.status = 'success'
+          item.warning = ''
+          return
+        } else if (response.status === 'FAILURE') {
+          item.status = 'failed'
+          item.warning = ''
+          item.error = response.error || 'OCR processing failed'
+          return
+        } else if (response.status === 'REVOKED') {
+          item.status = 'failed'
+          item.warning = ''
+          item.error = 'Task was revoked'
+          return
+        }
+      } catch (err) {
+        console.error('Error in silent polling for task:', taskId, err)
+      }
+
+      silentRetries++
+    }
+  })()
+
   return true
 }
 
