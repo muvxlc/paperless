@@ -132,5 +132,14 @@ export const PaperlessService = {
         });
         if (!response.ok) throw new Error('Failed to download document');
         return response; // Return the full response so we can stream it
+    },
+
+    // Get task status
+    async getTaskStatus(taskId: string) {
+        const response = await fetch(`${PAPERLESS_API_URL}/tasks/?task_id=${taskId}`, {
+            headers: getHeaders()
+        });
+        if (!response.ok) throw new Error(`Failed to fetch task status: ${response.statusText}`);
+        return response.json();
     }
 };
