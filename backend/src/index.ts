@@ -116,6 +116,7 @@ const app = new Elysia()
             const taskId = params.taskId
             try {
                 const data = await PaperlessService.getTaskStatus(taskId)
+                console.log(`[API] Polling Task ${taskId} response:`, JSON.stringify(data))
                 const task = Array.isArray(data) ? data[0] : (data.results && data.results[0])
 
                 if (task) {
