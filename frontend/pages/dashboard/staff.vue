@@ -143,9 +143,14 @@
                       
                       <!-- Progress bar or title / status info -->
                       <div class="mt-1 flex items-center space-x-2">
-                        <span v-if="item.status === 'success'" class="text-xs text-green-500 dark:text-green-400 flex items-center font-medium">
-                          <UIcon name="i-heroicons-check-circle" class="w-4 h-4 mr-1 flex-shrink-0" />
-                          Uploaded successfully
+                        <span v-if="item.status === 'success'" :class="item.warning ? 'text-amber-500 dark:text-amber-400' : 'text-green-500 dark:text-green-400'" class="text-xs flex items-center font-medium">
+                          <UIcon :name="item.warning ? 'i-heroicons-clock' : 'i-heroicons-check-circle'" class="w-4 h-4 mr-1 flex-shrink-0" />
+                          <span v-if="item.warning">
+                            Uploaded. {{ item.warning }}
+                          </span>
+                          <span v-else>
+                            Uploaded successfully
+                          </span>
                         </span>
                         <span v-else-if="item.status === 'processing'" class="text-xs text-orange-500 dark:text-orange-400 flex items-center font-medium">
                           <UIcon name="i-heroicons-arrow-path" class="w-4 h-4 mr-1 animate-spin flex-shrink-0" />
@@ -179,8 +184,8 @@
                     />
                     <UIcon 
                       v-else-if="item.status === 'success'" 
-                      name="i-heroicons-check-badge" 
-                      class="w-6 h-6 text-green-500" 
+                      :name="item.warning ? 'i-heroicons-clock' : 'i-heroicons-check-badge'" 
+                      :class="['w-6 h-6', item.warning ? 'text-amber-500' : 'text-green-500']" 
                     />
                     <UButton 
                       v-else-if="item.status === 'failed'" 
@@ -329,10 +334,12 @@ async function uploadSingle(item) {
 
 // Poll Paperless-ngx task queue for the document processing status
 async function pollTaskStatus(item, taskId) {
-  const maxRetries = 60 // 120 seconds maximum polling time
+  const maxFastRetries = 90 // 180 seconds maximum polling time (every 2 seconds)
+  const maxSlowRetries = 30 // Another 300 seconds maximum polling time (every 10 seconds)
   let retries = 0
   
-  while (retries < maxRetries) {
+  // Phase 1: Fast Polling (every 2 seconds for 3 minutes)
+  while (retries < maxFastRetries) {
     try {
       const response = await $fetch(`${config.public.apiBase}/api/upload/status/${taskId}`, {
         headers: {
@@ -343,6 +350,7 @@ async function pollTaskStatus(item, taskId) {
       // Paperless statuses: PENDING, STARTED, SUCCESS, FAILURE, REVOKED
       if (response.status === 'SUCCESS') {
         item.status = 'success'
+        item.warning = ''
         return true
       } else if (response.status === 'FAILURE') {
         item.status = 'failed'
@@ -361,9 +369,95 @@ async function pollTaskStatus(item, taskId) {
     await new Promise(resolve => setTimeout(resolve, 2000)) // Poll every 2 seconds
   }
   
-  item.status = 'failed'
-  item.error = 'Processing timeout. Document is likely still processing in the background.'
-  return false
+  // Phase 2: Transition to Slow Polling (every 10 seconds for another 5 minutes)
+  item.warning = 'Taking longer than expected. Still checking in the background...'
+  retries = 0
+  
+  while (retries < maxSlowRetries) {
+    try {
+      const response = await $fetch(`${config.public.apiBase}/api/upload/status/${taskId}`, {
+        headers: {
+          'Authorization': `Bearer ${auth.token}`
+        }
+      })
+      
+      if (response.status === 'SUCCESS') {
+        item.status = 'success'
+        item.warning = ''
+        return true
+      } else if (response.status === 'FAILURE') {
+        item.status = 'failed'
+        item.warning = ''
+        item.error = response.error || 'OCR processing failed'
+        return false
+      } else if (response.status === 'REVOKED') {
+        item.status = 'failed'
+        item.warning = ''
+        item.error = 'Task was revoked'
+        return false
+      }
+    } catch (err) {
+      console.error('Error polling status for task:', taskId, err)
+    }
+    
+    retries++
+    await new Promise(resolve => setTimeout(resolve, 10000)) // Poll every 10 seconds
+  }
+  
+  // Phase 3: Absolute timeout (8 minutes total) - assume success in background
+  item.status = 'success'
+  item.warning = 'Processing timeout...'
+  
+  // Phase 4: Silent background polling (every 30 seconds for another 30 minutes)
+  // This handles the case "what if it reports error or success later"
+  // Run it asynchronously so we don't block the caller from returning true (success status)
+  (async () => {
+    let silentRetries = 0
+    const maxSilentRetries = 60
+    while (silentRetries < maxSilentRetries) {
+      // Only continue polling if the item is still in 'success' status and has the timeout warning.
+      if (item.status !== 'success' || item.warning !== 'Processing timeout...') {
+        return
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 30000)) // Poll every 30 seconds
+
+      // Check again if status or warning has changed during the wait
+      if (item.status !== 'success' || item.warning !== 'Processing timeout...') {
+        return
+      }
+
+      try {
+        const response = await $fetch(`${config.public.apiBase}/api/upload/status/${taskId}`, {
+          headers: {
+            'Authorization': `Bearer ${auth.token}`
+          }
+        })
+
+        if (response.status === 'SUCCESS') {
+          item.status = 'success'
+          item.warning = ''
+          return
+        } else if (response.status === 'FAILURE') {
+          item.status = 'failed'
+          item.warning = ''
+          item.error = response.error || 'OCR processing failed'
+          return
+        } else if (response.status === 'REVOKED') {
+          item.status = 'failed'
+          item.warning = ''
+          item.error = 'Task was revoked'
+          return
+        }
+      } catch (err) {
+        console.error('Error in silent polling for task:', taskId, err)
+      }
+
+      silentRetries++
+    }
+  })()
+
+  return true
 }
 
 // Upload all files in the queue sequentially

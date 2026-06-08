@@ -81,13 +81,26 @@ const app = new Elysia()
 
             const file = body.file as Blob
             const title = body.title as string
+            const tagsInput = body.tags as string || ''
 
             try {
                 // Ensure 'Pending' tag exists
                 const pendingTagId = await PaperlessService.getOrCreateTag('Pending');
+                const tagIds = [pendingTagId];
 
-                // Upload with Tag
-                const result = await PaperlessService.uploadDocument(file, title, [pendingTagId]);
+                // Process custom tags if provided
+                if (tagsInput) {
+                    const tagNames = tagsInput.split(',').map(t => t.trim()).filter(Boolean);
+                    for (const name of tagNames) {
+                        const tagId = await PaperlessService.getOrCreateTag(name);
+                        if (!tagIds.includes(tagId)) {
+                            tagIds.push(tagId);
+                        }
+                    }
+                }
+
+                // Upload with Tags
+                const result = await PaperlessService.uploadDocument(file, title, tagIds);
 
                 // Track uploader
                 if (result.document_id || result.taskId) {
@@ -107,6 +120,17 @@ const app = new Elysia()
                     })
                 }
 
+                // Log Audit Event: UPLOAD
+                if (user?.id) {
+                    const targetId = paperlessDocId ? String(paperlessDocId) : (typeof result === 'string' ? result : (result.taskId || result.task_id || 'Unknown'));
+                    await db.insert(audit_logs).values({
+                        user_id: user.id as number,
+                        action: 'UPLOAD',
+                        target_id: targetId,
+                        details: `Uploaded document: "${title || 'Untitled'}". Uploader: ${user.username}`
+                    });
+                }
+
                 return { success: true, result }
             } catch (e: any) {
                 set.status = 500
@@ -115,7 +139,8 @@ const app = new Elysia()
         }, {
             body: t.Object({
                 file: t.File(),
-                title: t.Optional(t.String())
+                title: t.Optional(t.String()),
+                tags: t.Optional(t.String())
             })
         })
         // Staff: Get task status
@@ -202,12 +227,12 @@ const app = new Elysia()
                 const page = Number(query.page) || 1;
                 const pageSize = Number(query.limit) || Number(query.pageSize) || 12;
 
-                const pendingTagId = await PaperlessService.getOrCreateTag('Pending');
+                // Build search query exactly like the approve system
+                const searchQuery = search ? `tag:Pending ${search}` : 'tag:Pending';
                 
                 // Fetch paginated, searched documents with tag 'Pending'
                 const docs = await PaperlessService.getDocumentsAdvanced({
-                    tagId: pendingTagId,
-                    query: search || undefined,
+                    query: searchQuery,
                     page,
                     page_size: pageSize
                 });
@@ -549,7 +574,7 @@ const app = new Elysia()
                     user_id: user.id as number,
                     action: 'RESTORE',
                     target_id: String(docId),
-                    details: `Restored to ${restoreTagName} by ${user.username}`
+                    details: `Document: "${doc.title}". Restored to ${restoreTagName} by ${user.username}`
                 })
 
                 return { success: true }
@@ -606,7 +631,7 @@ const app = new Elysia()
                     user_id: user.id as number,
                     action: 'REJECT',
                     target_id: String(docId),
-                    details: `Rejected by ${user.username}. Comment: ${comment || 'None'}`
+                    details: `Document: "${doc.title}". Rejected by ${user.username}. Comment: ${comment || 'None'}`
                 })
 
                 return { success: true }
@@ -661,12 +686,16 @@ const app = new Elysia()
                     await PaperlessService.setDocumentTags(docId, currentTags);
                 }
 
+                // Fetch document details for the log
+                const reqDoc = await PaperlessService.getDocument(requestObj.paperless_id);
+                const reqDocTitle = reqDoc?.title || 'Untitled';
+
                 // Log Reject Event
                 await db.insert(audit_logs).values({
                     user_id: user.id as number,
                     action: 'REJECT_REQUEST',
                     target_id: String(requestObj.paperless_id),
-                    details: `Rejected access request ID ${requestId} by ${user.username}. Comment: ${comment || 'None'}`
+                    details: `Document: "${reqDocTitle}". Rejected access request ID ${requestId} by ${user.username}. Comment: ${comment || 'None'}`
                 });
 
                 return { success: true }
@@ -788,12 +817,23 @@ const app = new Elysia()
                     set.status = 403; return 'Forbidden';
                 }
 
+                // Fetch document title for audit log
+                let viewDocTitle = 'Untitled';
+                try {
+                    const viewDoc = await PaperlessService.getDocument(docId);
+                    if (viewDoc && viewDoc.title) {
+                        viewDocTitle = viewDoc.title;
+                    }
+                } catch (viewDocErr) {
+                    console.error('[API] Failed to fetch document title for audit log:', viewDocErr);
+                }
+
                 // Log the VIEW audit action
                 await db.insert(audit_logs).values({
                     user_id: userId,
                     action: 'VIEW',
                     target_id: String(docId),
-                    details: forceInline ? 'Restricted view (No download)' : 'Document downloaded/accessed'
+                    details: `Document: "${viewDocTitle}". ${forceInline ? 'Restricted view (No download)' : 'Downloaded/accessed'} by ${username}`
                 })
 
                 const response = await PaperlessService.downloadDocument(docId);

@@ -10,5 +10,5 @@ COPY . .
 
 EXPOSE 3001
 
-# Start the server (Migration must be run manually: bun run db:push)
-CMD ["bun", "run", "start"]
+# Start the server (Run db:init automatically to ensure tables exist, then start)
+CMD ["sh", "-c", "bun run db:init && bun run start"]
