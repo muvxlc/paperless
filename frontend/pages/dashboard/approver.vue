@@ -129,6 +129,9 @@
 
                   <!-- Restore: Rejected Only -->
                   <UButton v-if="item.key === 'rejected'" color="gray" variant="soft" icon="i-heroicons-arrow-path" label="Restore" @click="restore(doc.id)" />
+
+                  <!-- Delete permanently (All Tabs) -->
+                  <UButton color="red" variant="ghost" icon="i-heroicons-trash" @click="deleteDoc(doc.id, doc.title)" />
                 </div>
               </div>
             </UCard>
@@ -358,6 +361,21 @@ async function reject(id, requestId = null) {
     fetchData(true)
   } catch (err) {
     alert('Failed to reject: ' + err.message)
+  }
+}
+
+async function deleteDoc(id, title) {
+  if (!confirm(`ต้องการลบเอกสาร "${title}" อย่างถาวรใช่หรือไม่?\nการดำเนินการนี้จะลบไฟล์ออกจาก Paperless และล้างข้อมูลสิทธิ์ทั้งหมดในระบบ.`)) {
+    return
+  }
+  try {
+    await $fetch(`${config.public.apiBase}/api/document/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${auth.token}` }
+    })
+    fetchData(true)
+  } catch (err) {
+    alert('ลบเอกสารไม่สำเร็จ: ' + err.message)
   }
 }
 

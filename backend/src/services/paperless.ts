@@ -172,5 +172,17 @@ export const PaperlessService = {
         });
         if (!response.ok) throw new Error(`Failed to fetch task status: ${response.statusText}`);
         return response.json();
+    },
+
+    // Delete a document
+    async deleteDocument(id: number) {
+        const response = await fetch(`${PAPERLESS_API_URL}/documents/${id}/`, {
+            method: 'DELETE',
+            headers: getHeaders(),
+        });
+        if (!response.ok && response.status !== 404) {
+            throw new Error(`Failed to delete document from Paperless: ${response.statusText}`);
+        }
+        return true;
     }
 };
