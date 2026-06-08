@@ -704,6 +704,47 @@ const app = new Elysia()
                 set.status = 500; return { error: e.message }
             }
         })
+        // Delete document (Approver/Admin only)
+        .delete('/document/:id', async ({ params, user, set }) => {
+            if (user?.role !== 'approver' && user?.role !== 'admin') {
+                set.status = 403; return 'Forbidden'
+            }
+            const docId = parseInt(params.id)
+            try {
+                // Try to get document details to find the title for logging
+                let docTitle = 'Untitled';
+                try {
+                    const doc = await PaperlessService.getDocument(docId);
+                    if (doc && doc.title) {
+                        docTitle = doc.title;
+                    }
+                } catch (err) {
+                    console.warn(`[API] Document #${docId} metadata fetch failed before delete. Proceeding with DB cleanup.`, err);
+                }
+
+                // 1. Delete from Paperless-ngx
+                await PaperlessService.deleteDocument(docId);
+
+                // 2. Delete DB tracking and permissions entries
+                await db.delete(document_tracking).where(eq(document_tracking.paperless_id, docId));
+                await db.delete(document_permissions).where(eq(document_permissions.paperless_id, docId));
+                await db.delete(approvals).where(eq(approvals.paperless_doc_id, docId));
+                await db.delete(user_requests).where(eq(user_requests.paperless_id, docId));
+
+                // 3. Log Audit Event: DELETE
+                await db.insert(audit_logs).values({
+                    user_id: user.id as number,
+                    action: 'DELETE',
+                    target_id: String(docId),
+                    details: `Document: "${docTitle}". Deleted permanently by ${user.username}`
+                });
+
+                return { success: true }
+            } catch (e: any) {
+                console.error(`[API] Error deleting document #${docId}:`, e);
+                set.status = 500; return { error: e.message }
+            }
+        })
         // Get Rejected documents
         .get('/rejected', async ({ user, set }: any) => {
             if (user?.role !== 'approver' && user?.role !== 'admin') {

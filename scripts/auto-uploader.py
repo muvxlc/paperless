@@ -123,9 +123,11 @@ def upload_document(token, filepath, title):
         log(f"Upload exception for {filepath}: {e}")
         return False
 
-def scan_and_upload():
+def scan_and_upload(force=False):
     log(f"Starting auto-uploader sweep...")
     log(f"Scan Directory: {SCAN_DIR}")
+    if force:
+        log("Force mode enabled: local tracker will be bypassed, checking remote server directly.")
     
     if not os.path.exists(SCAN_DIR):
         log(f"Error: Scan directory '{SCAN_DIR}' does not exist.")
@@ -162,8 +164,8 @@ def scan_and_upload():
                     if not file_hash:
                         continue
                         
-                    # Skip if already in local tracker
-                    if pdf_path in tracker and tracker[pdf_path].get("hash") == file_hash:
+                    # Skip if already in local tracker (unless force mode is active)
+                    if not force and pdf_path in tracker and tracker[pdf_path].get("hash") == file_hash:
                         skipped_count += 1
                         continue
                         
@@ -200,4 +202,9 @@ def scan_and_upload():
     log(f"Sweep complete. Uploaded: {uploaded_count}, Skipped: {skipped_count}, Failed: {failed_count}")
 
 if __name__ == "__main__":
-    scan_and_upload()
+    import argparse
+    parser = argparse.ArgumentParser(description="Auto uploader script for Paperless Custom Portal")
+    parser.add_argument("--force", action="store_true", help="Force upload even if already in local tracker")
+    args = parser.parse_args()
+    
+    scan_and_upload(force=args.force)
