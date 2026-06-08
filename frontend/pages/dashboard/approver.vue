@@ -14,7 +14,7 @@
     </div>
 
     <!-- Stats Summary Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+    <div class="grid grid-cols-1 sm:grid-cols-4 gap-6">
       <!-- Pending Card -->
       <div class="bg-gradient-to-br from-blue-400 to-indigo-500 p-5 rounded-2xl text-white shadow-xs relative overflow-hidden group hover:scale-[1.02] transition-transform duration-200 cursor-pointer" @click="activeTab = 0">
         <div class="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-300">
@@ -25,8 +25,18 @@
         <p class="text-[11px] opacity-75 mt-1">Requires approval</p>
       </div>
 
+      <!-- User Requests Card -->
+      <div class="bg-gradient-to-br from-amber-400 to-orange-500 p-5 rounded-2xl text-white shadow-xs relative overflow-hidden group hover:scale-[1.02] transition-transform duration-200 cursor-pointer" @click="activeTab = 1">
+        <div class="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-300">
+          <UIcon name="i-heroicons-user-group" class="w-20 h-20" />
+        </div>
+        <p class="text-xs opacity-90 font-medium mb-1">User Requests</p>
+        <p class="text-3xl font-extrabold tracking-tight">{{ requestDocs.length }}</p>
+        <p class="text-[11px] opacity-75 mt-1">Files requested by users</p>
+      </div>
+
       <!-- Approved Card -->
-      <div class="bg-gradient-to-br from-emerald-400 to-teal-500 p-5 rounded-2xl text-white shadow-xs relative overflow-hidden group hover:scale-[1.02] transition-transform duration-200 cursor-pointer" @click="activeTab = 1">
+      <div class="bg-gradient-to-br from-emerald-400 to-teal-500 p-5 rounded-2xl text-white shadow-xs relative overflow-hidden group hover:scale-[1.02] transition-transform duration-200 cursor-pointer" @click="activeTab = 2">
         <div class="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-300">
           <UIcon name="i-heroicons-check-circle" class="w-20 h-20" />
         </div>
@@ -36,7 +46,7 @@
       </div>
 
       <!-- Rejected Card -->
-      <div class="bg-gradient-to-br from-red-400 to-rose-500 p-5 rounded-2xl text-white shadow-xs relative overflow-hidden group hover:scale-[1.02] transition-transform duration-200 cursor-pointer" @click="activeTab = 2">
+      <div class="bg-gradient-to-br from-red-400 to-rose-500 p-5 rounded-2xl text-white shadow-xs relative overflow-hidden group hover:scale-[1.02] transition-transform duration-200 cursor-pointer" @click="activeTab = 3">
         <div class="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-300">
           <UIcon name="i-heroicons-x-circle" class="w-20 h-20" />
         </div>
@@ -70,8 +80,8 @@
                 <div class="flex items-start gap-4 min-w-0 flex-1">
                   <div class="p-2 bg-gray-50 dark:bg-gray-800 rounded-xl text-gray-500 shrink-0">
                     <UIcon 
-                      :name="item.key === 'pending' ? 'i-heroicons-document-magnifying-glass' : (item.key === 'approved' ? 'i-heroicons-check-badge' : 'i-heroicons-x-circle')" 
-                      :class="['text-2xl', item.key === 'pending' ? 'text-blue-500' : (item.key === 'approved' ? 'text-green-500' : 'text-red-500')]" 
+                      :name="item.key === 'pending' || item.key === 'requests' ? 'i-heroicons-document-magnifying-glass' : (item.key === 'approved' ? 'i-heroicons-check-badge' : 'i-heroicons-x-circle')" 
+                      :class="['text-2xl', item.key === 'pending' ? 'text-blue-500' : (item.key === 'requests' ? 'text-amber-500' : (item.key === 'approved' ? 'text-green-500' : 'text-red-500'))]" 
                     />
                   </div>
                   <div class="min-w-0 flex-1">
@@ -91,23 +101,28 @@
                         <UIcon name="i-heroicons-clock" class="w-3.5 h-3.5" />
                         Expires: {{ formatTimestamp(doc.expires_at) }}
                       </span>
+                      <span v-if="doc.comment && item.key === 'rejected'" class="flex items-center gap-1 text-red-500 font-semibold">
+                        <span>&bull;</span>
+                        <UIcon name="i-heroicons-chat-bubble-left-right" class="w-3.5 h-3.5" />
+                        Reason: {{ doc.comment }}
+                      </span>
                     </div>
                   </div>
                 </div>
                 
                 <div class="flex items-center gap-2 self-end sm:self-center shrink-0">
                   <!-- View: All Tabs -->
-                  <UButton color="gray" variant="ghost" icon="i-heroicons-eye" :to="`${config.public.apiBase}/api/download/${doc.id}?token=${auth.token}`" target="_blank">
+                  <UButton color="gray" variant="ghost" icon="i-heroicons-eye" :to="`${config.public.apiBase}/api/download/${doc.id}?token=${auth.token}&inline=true`" target="_blank">
                     View
                   </UButton>
                   
-                  <!-- Approve: Pending & Rejected -->
-                  <UButton v-if="item.key === 'pending' || item.key === 'rejected'" color="green" icon="i-heroicons-check" @click="openApproveModal(doc.id)">
+                  <!-- Approve: Pending, Requests & Rejected -->
+                  <UButton v-if="item.key === 'pending' || item.key === 'requests' || item.key === 'rejected'" color="green" icon="i-heroicons-check" @click="openApproveModal(doc.id, doc.owner_id)">
                     Approve
                   </UButton>
                   
-                  <!-- Reject: Pending Only -->
-                  <UButton v-if="item.key === 'pending'" color="red" variant="soft" icon="i-heroicons-x-mark" label="Reject" @click="reject(doc.id)" />
+                  <!-- Reject: Pending & Requests Only -->
+                  <UButton v-if="item.key === 'pending' || item.key === 'requests'" color="red" variant="soft" icon="i-heroicons-x-mark" label="Reject" @click="reject(doc.id)" />
                   
                   <!-- Undo Approval: Approved Only -->
                   <UButton v-if="item.key === 'approved'" color="orange" variant="soft" icon="i-heroicons-arrow-uturn-left" label="Undo Approval" @click="restore(doc.id, true)" />
@@ -186,6 +201,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 const config = useRuntimeConfig()
 const auth = useAuthStore()
 const pendingDocs = ref([])
+const requestDocs = ref([])
 const approvedDocs = ref([])
 const rejectedDocs = ref([])
 const availableUsers = ref([])
@@ -203,6 +219,7 @@ const allowDownload = ref(false) // Default false (View Only)
 
 const tabs = [
   { key: 'pending', label: 'Pending Approvals' },
+  { key: 'requests', label: 'User Requests' },
   { key: 'approved', label: 'Recently Approved' },
   { key: 'rejected', label: 'Rejected Documents' }
 ]
@@ -222,7 +239,8 @@ const targetUsers = computed(() => {
 
 const currentDocs = computed(() => {
   if (activeTab.value === 0) return pendingDocs.value
-  if (activeTab.value === 1) return approvedDocs.value
+  if (activeTab.value === 1) return requestDocs.value
+  if (activeTab.value === 2) return approvedDocs.value
   return rejectedDocs.value
 })
 
@@ -235,9 +253,9 @@ function selectAll() {
     selectedUserIds.value = targetUsers.value.map(u => u.id)
 }
 
-function openApproveModal(id) {
+function openApproveModal(id, ownerId = null) {
     selectedDocId.value = id
-    selectedUserIds.value = []
+    selectedUserIds.value = ownerId ? [ownerId] : []
     selectedExpiration.value = 5
     allowDownload.value = false
     isApproveModalOpen.value = true
@@ -292,8 +310,12 @@ async function fetchUsers() {
 async function fetchData(forceRefetch = false) {
   pending.value = true
   try {
-    const [pendingRes, approvedRes, rejectedRes] = await Promise.all([
+    const [pendingRes, requestsRes, approvedRes, rejectedRes] = await Promise.all([
       $fetch(`${config.public.apiBase}/api/pending`, {
+        headers: { 'Authorization': `Bearer ${auth.token}` },
+        params: forceRefetch ? { t: Date.now() } : {}
+      }),
+      $fetch(`${config.public.apiBase}/api/requests`, {
         headers: { 'Authorization': `Bearer ${auth.token}` },
         params: forceRefetch ? { t: Date.now() } : {}
       }),
@@ -308,6 +330,7 @@ async function fetchData(forceRefetch = false) {
     ])
     
     pendingDocs.value = pendingRes?.results || (Array.isArray(pendingRes) ? pendingRes : [])
+    requestDocs.value = requestsRes?.results || (Array.isArray(requestsRes) ? requestsRes : [])
     approvedDocs.value = approvedRes?.results || (Array.isArray(approvedRes) ? approvedRes : [])
     rejectedDocs.value = rejectedRes?.results || (Array.isArray(rejectedRes) ? rejectedRes : [])
   } catch (err) {
@@ -318,11 +341,13 @@ async function fetchData(forceRefetch = false) {
 }
 
 async function reject(id) {
-  if (!confirm('Are you sure you want to reject this document?')) return
+  const comment = prompt('โปรดระบุเหตุผลในการปฏิเสธคำขอนี้ (ไม่บังคับ):')
+  if (comment === null) return // User cancelled the prompt
 
   try {
     await $fetch(`${config.public.apiBase}/api/reject/${id}`, {
         method: 'POST',
+        body: { comment },
         headers: { 'Authorization': `Bearer ${auth.token}` }
     })
     fetchData(true)
@@ -332,7 +357,7 @@ async function reject(id) {
 }
 
 async function restore(id, isUndo = false) {
-    const msg = isUndo ? 'Undo approval and move back to Pending?' : 'Move back to Pending?'
+    const msg = isUndo ? 'Undo approval and move back to Pending/Request queue?' : 'Move back to Pending/Request queue?'
     if (!confirm(msg)) return
     try {
         await $fetch(`${config.public.apiBase}/api/restore/${id}`, {
