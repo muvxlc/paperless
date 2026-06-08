@@ -69,11 +69,11 @@ const app = new Elysia()
                 return 'Unauthorized'
             }
         })
-        // Staff: Upload
+        // Upload (Staff: Pending, User: Request)
         .post('/upload', async ({ body, user, set }) => {
-            if (user?.role !== 'staff' && user?.role !== 'admin') {
-                set.status = 403
-                return 'Forbidden'
+            if (!user) {
+                set.status = 401
+                return 'Unauthorized'
             }
             // body.file should be the file
             // In Elysia, body needs t.File() schema for file upload usually, or just access it
@@ -83,11 +83,13 @@ const app = new Elysia()
             const title = body.title as string
 
             try {
-                // Ensure 'Pending' tag exists
-                const pendingTagId = await PaperlessService.getOrCreateTag('Pending');
+                // Ensure appropriate tag exists based on user role
+                const isStandardUser = user.role === 'user';
+                const tagName = isStandardUser ? 'Request' : 'Pending';
+                const tagId = await PaperlessService.getOrCreateTag(tagName);
 
                 // Upload with Tag
-                const result = await PaperlessService.uploadDocument(file, title, [pendingTagId]);
+                const result = await PaperlessService.uploadDocument(file, title, [tagId]);
 
                 // Track uploader
                 if (result.document_id || result.taskId) {
@@ -118,11 +120,11 @@ const app = new Elysia()
                 title: t.Optional(t.String())
             })
         })
-        // Staff: Get task status
+        // Get task status
         .get('/upload/status/:taskId', async ({ params, user, set }) => {
-            if (user?.role !== 'staff' && user?.role !== 'admin') {
-                set.status = 403
-                return 'Forbidden'
+            if (!user) {
+                set.status = 401
+                return 'Unauthorized'
             }
 
             const taskId = params.taskId
@@ -192,6 +194,82 @@ const app = new Elysia()
                 set.status = 500; return { error: e.message }
             }
         })
+        // Approver/Admin: List User Requests
+        .get('/requests', async ({ user, set }) => {
+            if (user?.role !== 'approver' && user?.role !== 'admin') {
+                set.status = 403; return 'Forbidden'
+            }
+            try {
+                const docs = await PaperlessService.getDocuments('tag:Request');
+                const enrichedResults = await Promise.all(docs.results.map(async (doc: any) => {
+                    const tracking = await db.select({
+                        uploader_id: document_tracking.uploader_id,
+                        uploader_name: users.username
+                    })
+                        .from(document_tracking)
+                        .leftJoin(users, eq(document_tracking.uploader_id, users.id))
+                        .where(eq(document_tracking.paperless_id, doc.id))
+                        .limit(1);
+
+                    return {
+                        ...doc,
+                        owner_id: tracking[0]?.uploader_id || null,
+                        owner_name: tracking[0]?.uploader_name || 'System'
+                    }
+                }));
+
+                return { ...docs, results: enrichedResults }
+            } catch (e: any) {
+                console.error('[API] Error fetching user requests:', e);
+                set.status = 500; return { error: e.message }
+            }
+        })
+        // User: List My Requests (Request & Rejected documents uploaded by me)
+        .get('/my-requests', async ({ user, set }) => {
+            if (!user) {
+                set.status = 401; return 'Unauthorized'
+            }
+            try {
+                // Find all paperless IDs uploaded by the current user
+                const tracked = await db.select()
+                    .from(document_tracking)
+                    .where(eq(document_tracking.uploader_id, user.id));
+
+                if (tracked.length === 0) {
+                    return { count: 0, results: [] }
+                }
+
+                const [requestDocs, rejectedDocs] = await Promise.all([
+                    PaperlessService.getDocuments('tag:Request'),
+                    PaperlessService.getDocuments('tag:Rejected')
+                ]);
+
+                const combinedDocs = [...(requestDocs.results || []), ...(rejectedDocs.results || [])];
+                const trackedDocIds = new Set(tracked.map(t => t.paperless_id));
+
+                // Filter docs that were uploaded by this user
+                const myDocs = combinedDocs.filter((doc: any) => trackedDocIds.has(doc.id));
+
+                // Query approvals for status and comment
+                const docDetails = await Promise.all(myDocs.map(async (doc: any) => {
+                    const approvalRec = await db.select()
+                        .from(approvals)
+                        .where(eq(approvals.paperless_doc_id, doc.id))
+                        .limit(1);
+                    
+                    return {
+                        ...doc,
+                        status: approvalRec[0]?.status || 'pending',
+                        comment: approvalRec[0]?.comment || ''
+                    }
+                }));
+
+                return { count: docDetails.length, results: docDetails }
+            } catch (e: any) {
+                console.error('[API] Error fetching my requests:', e);
+                set.status = 500; return { error: e.message }
+            }
+        })
         // Approver: Approve
         // Approver: Approve
         .post('/approve/:id', async ({ params, user, set, body }) => {
@@ -207,13 +285,14 @@ const app = new Elysia()
                 const pendingId = await PaperlessService.getOrCreateTag('Pending');
                 const approvedId = await PaperlessService.getOrCreateTag('Approved');
                 const rejectedId = await PaperlessService.getOrCreateTag('Rejected');
+                const requestId = await PaperlessService.getOrCreateTag('Request');
 
                 // Get current tags
                 const doc = await PaperlessService.getDocument(docId);
                 let currentTags = doc.tags || [];
 
-                // Add Approved, Remove Pending AND Rejected
-                currentTags = currentTags.filter((t: any) => t !== pendingId && t !== rejectedId);
+                // Add Approved, Remove Pending, Rejected AND Request
+                currentTags = currentTags.filter((t: any) => t !== pendingId && t !== rejectedId && t !== requestId);
                 if (!currentTags.includes(approvedId)) {
                     currentTags.push(approvedId);
                 }
@@ -243,23 +322,25 @@ const app = new Elysia()
                         .where(eq(document_tracking.paperless_id, docId));
                 }
 
-                // Check if existing record in approvals? The flow assumes it's there.
-                // If approving from scratch (fresh upload), it might need insert.
-                // But our logic assumes 'approvals' table tracks requests.
-                // Actually, if we restore, we update.
+                // Check uploader role. If it is a standard user, automatically add them to userIds
+                const finalUserIds = [...(userIds || [])];
+                const tracking = await db.select({
+                    uploader_id: document_tracking.uploader_id,
+                    role: users.role
+                })
+                    .from(document_tracking)
+                    .leftJoin(users, eq(document_tracking.uploader_id, users.id))
+                    .where(eq(document_tracking.paperless_id, docId))
+                    .limit(1);
 
-                // Log to DB (Update or Insert?)
-                // The previous logic was just `db.insert(approvals)`. This might duplicate if we re-approve?
-                // `approvals` table has `paperless_doc_id`. 
-                // We should probably UPSERT or check exist.
-                // For now, let's assume the previous flow was insert-only which implies multiple logs or PK violation?
-                // `approvals` PK is `id`. `paperless_doc_id` is not unique in schema?
-                // Schema: paperless_doc_id int not null.
-                // If I insert again, I get multiple rows for same doc.
-                // Previous code: `await db.insert(approvals)...`
-                // I should probably clean up previous status rows or just insert new history?
-                // Let's stick to update if exists, insert if not.
+                const uploaderId = tracking[0]?.uploader_id;
+                const uploaderRole = tracking[0]?.role;
 
+                if (uploaderId && uploaderRole === 'user' && !finalUserIds.includes(uploaderId)) {
+                    finalUserIds.push(uploaderId);
+                }
+
+                // Update approvals DB table status
                 const existing = await db.select().from(approvals).where(eq(approvals.paperless_doc_id, docId));
                 if (existing.length > 0) {
                     await db.update(approvals).set({
@@ -277,10 +358,10 @@ const app = new Elysia()
 
                 // Fetch Usernames for Audit Log
                 let approvedForNames = 'None';
-                if (userIds && userIds.length > 0) {
+                if (finalUserIds && finalUserIds.length > 0) {
                     const approvedUsers = await db.select({ username: users.username })
                         .from(users)
-                        .where(inArray(users.id, userIds));
+                        .where(inArray(users.id, finalUserIds));
                     approvedForNames = approvedUsers.map(u => u.username).join(', ');
                 }
 
@@ -293,12 +374,12 @@ const app = new Elysia()
                 })
 
                 // Save Permissions
-                if (userIds && Array.isArray(userIds)) {
+                if (finalUserIds && Array.isArray(finalUserIds)) {
                     // Clear existing if any (undo then redo)
                     await db.delete(document_permissions).where(eq(document_permissions.paperless_id, docId))
 
-                    if (userIds.length > 0) {
-                        for (const uid of userIds) {
+                    if (finalUserIds.length > 0) {
+                        for (const uid of finalUserIds) {
                             await db.insert(document_permissions).values({
                                 paperless_id: docId,
                                 user_id: uid,
@@ -313,7 +394,7 @@ const app = new Elysia()
                 set.status = 500; return { error: e.message }
             }
         })
-        // Restore (Rejected -> Pending)
+        // Restore (Rejected -> Pending or Request)
         .post('/restore/:id', async ({ params, user, set }: any) => {
             if (user?.role !== 'approver' && user?.role !== 'admin') {
                 set.status = 403; return 'Forbidden'
@@ -323,26 +404,41 @@ const app = new Elysia()
                 const pendingId = await PaperlessService.getOrCreateTag('Pending');
                 const rejectedId = await PaperlessService.getOrCreateTag('Rejected');
                 const approvedId = await PaperlessService.getOrCreateTag('Approved');
+                const requestId = await PaperlessService.getOrCreateTag('Request');
 
                 const doc = await PaperlessService.getDocument(docId);
                 let currentTags = doc.tags || [];
 
-                // Remove Rejected and Approved
-                currentTags = currentTags.filter((t: number) => t !== rejectedId && t !== approvedId);
-                // Add Pending
-                if (!currentTags.includes(pendingId)) currentTags.push(pendingId);
+                // Remove Rejected and Approved and Pending and Request
+                currentTags = currentTags.filter((t: number) => t !== rejectedId && t !== approvedId && t !== pendingId && t !== requestId);
+                
+                // Check who uploaded it to decide whether to restore to Pending or Request
+                const tracking = await db.select({
+                    role: users.role
+                })
+                    .from(document_tracking)
+                    .leftJoin(users, eq(document_tracking.uploader_id, users.id))
+                    .where(eq(document_tracking.paperless_id, docId))
+                    .limit(1);
+
+                const uploaderRole = tracking[0]?.role;
+                const isUserRequest = uploaderRole === 'user';
+                const restoreTagId = isUserRequest ? requestId : pendingId;
+                const restoreTagName = isUserRequest ? 'Request' : 'Pending';
+
+                if (!currentTags.includes(restoreTagId)) currentTags.push(restoreTagId);
 
                 await PaperlessService.setDocumentTags(docId, currentTags);
 
                 // Update DB status
-                await db.update(approvals).set({ status: 'pending' }).where(eq(approvals.paperless_doc_id, docId));
+                await db.update(approvals).set({ status: 'pending', comment: null }).where(eq(approvals.paperless_doc_id, docId));
 
                 // Log Restore
                 await db.insert(audit_logs).values({
                     user_id: user.id as number,
                     action: 'RESTORE',
                     target_id: String(docId),
-                    details: `Restored to Pending by ${user.username}`
+                    details: `Restored to ${restoreTagName} by ${user.username}`
                 })
 
                 return { success: true }
@@ -351,38 +447,55 @@ const app = new Elysia()
             }
         })
         // Approver: Reject (Move to Rejected Tag)
-        .post('/reject/:id', async ({ params, user, set }: any) => {
+        .post('/reject/:id', async ({ params, user, set, body }) => {
             if (user?.role !== 'approver' && user?.role !== 'admin') {
                 set.status = 403; return 'Forbidden'
             }
             const docId = parseInt(params.id)
+            const { comment } = (body || {}) as { comment?: string }
             try {
                 // Get Tag IDs
                 const pendingId = await PaperlessService.getOrCreateTag('Pending');
                 const approvedId = await PaperlessService.getOrCreateTag('Approved');
                 const rejectedId = await PaperlessService.getOrCreateTag('Rejected');
+                const requestId = await PaperlessService.getOrCreateTag('Request');
 
                 // Get current tags
                 const doc = await PaperlessService.getDocument(docId);
                 let currentTags = doc.tags || [];
 
-                // Remove Approved AND Pending
-                currentTags = currentTags.filter((t: number) => t !== approvedId && t !== pendingId);
+                // Remove Approved, Pending, Request
+                currentTags = currentTags.filter((t: number) => t !== approvedId && t !== pendingId && t !== requestId);
 
                 // Add Rejected
                 if (!currentTags.includes(rejectedId)) currentTags.push(rejectedId);
 
                 await PaperlessService.setDocumentTags(docId, currentTags);
 
-                // Update DB status
-                await db.update(approvals).set({ status: 'rejected' }).where(eq(approvals.paperless_doc_id, docId));
+                // Update DB status and comment (upsert to handle missing approvals entries)
+                const existing = await db.select().from(approvals).where(eq(approvals.paperless_doc_id, docId));
+                if (existing.length > 0) {
+                    await db.update(approvals).set({
+                        status: 'rejected',
+                        comment: comment || null,
+                        actor_id: user.id as number,
+                        created_at: new Date()
+                    }).where(eq(approvals.paperless_doc_id, docId));
+                } else {
+                    await db.insert(approvals).values({
+                        paperless_doc_id: docId,
+                        status: 'rejected',
+                        comment: comment || null,
+                        actor_id: user.id as number
+                    })
+                }
 
                 // Log Reject Event
                 await db.insert(audit_logs).values({
                     user_id: user.id as number,
                     action: 'REJECT',
                     target_id: String(docId),
-                    details: `Rejected by ${user.username}`
+                    details: `Rejected by ${user.username}. Comment: ${comment || 'None'}`
                 })
 
                 return { success: true }
@@ -945,21 +1058,36 @@ setInterval(async () => {
             console.log(`[Scheduler] Found ${expiredDocs.length} expired documents.`);
             const pendingId = await PaperlessService.getOrCreateTag('Pending');
             const approvedId = await PaperlessService.getOrCreateTag('Approved');
+            const requestId = await PaperlessService.getOrCreateTag('Request');
 
             for (const doc of expiredDocs) {
                 try {
                     const paperlessDoc = await PaperlessService.getDocument(doc.paperless_id);
                     let currentTags = paperlessDoc.tags || [];
 
-                    // If it has "Approved" tag, remove it and add "Pending"
+                    // If it has "Approved" tag, remove it and add Pending or Request
                     if (currentTags.includes(approvedId)) {
                         currentTags = currentTags.filter((t: number) => t !== approvedId);
-                        if (!currentTags.includes(pendingId)) {
-                            currentTags.push(pendingId);
+
+                        // Find uploader role
+                        const tracking = await db.select({
+                            role: users.role
+                        })
+                            .from(document_tracking)
+                            .leftJoin(users, eq(document_tracking.uploader_id, users.id))
+                            .where(eq(document_tracking.paperless_id, doc.paperless_id))
+                            .limit(1);
+
+                        const isUserRequest = tracking[0]?.role === 'user';
+                        const targetTagId = isUserRequest ? requestId : pendingId;
+                        const targetTagName = isUserRequest ? 'Request' : 'Pending';
+
+                        if (!currentTags.includes(targetTagId)) {
+                            currentTags.push(targetTagId);
                         }
 
                         await PaperlessService.setDocumentTags(doc.paperless_id, currentTags);
-                        console.log(`[Scheduler] Reverted Doc ${doc.paperless_id} to Pending.`);
+                        console.log(`[Scheduler] Reverted Doc ${doc.paperless_id} to ${targetTagName}.`);
                     }
 
                     // Clear expires_at
