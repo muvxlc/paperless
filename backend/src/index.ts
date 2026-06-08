@@ -4,7 +4,7 @@ import { authRoutes } from './routes/auth'
 import { jwt } from '@elysiajs/jwt'
 import { PaperlessService } from './services/paperless'
 import { db } from './db'
-import { approvals, document_tracking, users, document_permissions, audit_logs } from './db/schema'
+import { approvals, document_tracking, users, document_permissions, audit_logs, user_requests } from './db/schema'
 import { eq, desc, and, inArray, lt, sql } from 'drizzle-orm'
 
 // Memory storage for short-lived, one-time document view tokens
@@ -69,11 +69,11 @@ const app = new Elysia()
                 return 'Unauthorized'
             }
         })
-        // Upload (Staff: Pending, User: Request)
+        // Staff: Upload
         .post('/upload', async ({ body, user, set }) => {
-            if (!user) {
-                set.status = 401
-                return 'Unauthorized'
+            if (user?.role !== 'staff' && user?.role !== 'admin') {
+                set.status = 403
+                return 'Forbidden'
             }
             // body.file should be the file
             // In Elysia, body needs t.File() schema for file upload usually, or just access it
@@ -83,13 +83,11 @@ const app = new Elysia()
             const title = body.title as string
 
             try {
-                // Ensure appropriate tag exists based on user role
-                const isStandardUser = user.role === 'user';
-                const tagName = isStandardUser ? 'Request' : 'Pending';
-                const tagId = await PaperlessService.getOrCreateTag(tagName);
+                // Ensure 'Pending' tag exists
+                const pendingTagId = await PaperlessService.getOrCreateTag('Pending');
 
                 // Upload with Tag
-                const result = await PaperlessService.uploadDocument(file, title, [tagId]);
+                const result = await PaperlessService.uploadDocument(file, title, [pendingTagId]);
 
                 // Track uploader
                 if (result.document_id || result.taskId) {
@@ -120,11 +118,11 @@ const app = new Elysia()
                 title: t.Optional(t.String())
             })
         })
-        // Get task status
+        // Staff: Get task status
         .get('/upload/status/:taskId', async ({ params, user, set }) => {
-            if (!user) {
-                set.status = 401
-                return 'Unauthorized'
+            if (user?.role !== 'staff' && user?.role !== 'admin') {
+                set.status = 403
+                return 'Forbidden'
             }
 
             const taskId = params.taskId
@@ -194,83 +192,196 @@ const app = new Elysia()
                 set.status = 500; return { error: e.message }
             }
         })
-        // Approver/Admin: List User Requests
+        // User: List available pending documents for requesting access
+        .get('/available-pending', async ({ query, user, set }) => {
+            if (!user) {
+                set.status = 401; return 'Unauthorized'
+            }
+            try {
+                const search = query.search as string || '';
+                const page = Number(query.page) || 1;
+                const pageSize = Number(query.limit) || Number(query.pageSize) || 12;
+
+                const pendingTagId = await PaperlessService.getOrCreateTag('Pending');
+                
+                // Fetch paginated, searched documents with tag 'Pending'
+                const docs = await PaperlessService.getDocumentsAdvanced({
+                    tagId: pendingTagId,
+                    query: search || undefined,
+                    page,
+                    page_size: pageSize
+                });
+                
+                // Fetch all requests by this user
+                const userRequestsList = await db.select()
+                    .from(user_requests)
+                    .where(eq(user_requests.user_id, user.id));
+                
+                const requestedMap = new Map(userRequestsList.map(r => [r.paperless_id, r.status]));
+
+                // Enrich results with request status for this user
+                const enrichedResults = docs.results.map((doc: any) => {
+                    return {
+                        ...doc,
+                        request_status: requestedMap.get(doc.id) || null // 'pending', 'approved', 'rejected' or null
+                    }
+                });
+
+                return { ...docs, results: enrichedResults }
+            } catch (e: any) {
+                console.error('[API] Error fetching available pending docs:', e);
+                set.status = 500; return { error: e.message }
+            }
+        })
+        // User: Request access to a document
+        .post('/request-access/:id', async ({ params, user, set }) => {
+            if (!user) {
+                set.status = 401; return 'Unauthorized'
+            }
+            const docId = parseInt(params.id)
+            try {
+                // Verify the document exists and has the 'Pending' or 'Request' tag
+                const doc = await PaperlessService.getDocument(docId);
+                const pendingId = await PaperlessService.getOrCreateTag('Pending');
+                const requestId = await PaperlessService.getOrCreateTag('Request');
+                
+                const tags = doc.tags || [];
+                if (!tags.includes(pendingId) && !tags.includes(requestId)) {
+                    set.status = 400; return { error: 'Document is not available for requesting access.' }
+                }
+
+                // Check if user has already requested access to this document
+                const existing = await db.select()
+                    .from(user_requests)
+                    .where(and(
+                        eq(user_requests.paperless_id, docId),
+                        eq(user_requests.user_id, user.id)
+                    ));
+
+                if (existing.length > 0) {
+                    // If already requested and pending/approved, return error
+                    if (existing[0].status === 'pending' || existing[0].status === 'approved') {
+                        set.status = 400; return { error: 'Access already requested or approved.' }
+                    }
+                    // If rejected, allow requesting again! Update request back to pending
+                    await db.update(user_requests)
+                        .set({ status: 'pending', comment: null, created_at: new Date() })
+                        .where(eq(user_requests.id, existing[0].id));
+                } else {
+                    // Create new request
+                    await db.insert(user_requests).values({
+                        paperless_id: docId,
+                        user_id: user.id,
+                        status: 'pending'
+                    });
+                }
+
+                // Add the 'Request' tag to the document in Paperless-ngx so it appears in the Approver's request queue
+                if (!tags.includes(requestId)) {
+                    tags.push(requestId);
+                    await PaperlessService.setDocumentTags(docId, tags);
+                }
+
+                // Log the audit log
+                await db.insert(audit_logs).values({
+                    user_id: user.id,
+                    action: 'REQUEST_ACCESS',
+                    target_id: String(docId),
+                    details: `Requested access to document: "${doc.title}"`
+                });
+
+                return { success: true }
+            } catch (e: any) {
+                console.error('[API] Error requesting access:', e);
+                set.status = 500; return { error: e.message }
+            }
+        })
+        // Approver/Admin: List User Requests (from user_requests table)
         .get('/requests', async ({ user, set }) => {
             if (user?.role !== 'approver' && user?.role !== 'admin') {
                 set.status = 403; return 'Forbidden'
             }
             try {
-                const docs = await PaperlessService.getDocuments('tag:Request');
-                const enrichedResults = await Promise.all(docs.results.map(async (doc: any) => {
-                    const tracking = await db.select({
-                        uploader_id: document_tracking.uploader_id,
-                        uploader_name: users.username
-                    })
-                        .from(document_tracking)
-                        .leftJoin(users, eq(document_tracking.uploader_id, users.id))
-                        .where(eq(document_tracking.paperless_id, doc.id))
-                        .limit(1);
+                // Fetch all pending user requests
+                const pendingRequests = await db.select({
+                    id: user_requests.id,
+                    paperless_id: user_requests.paperless_id,
+                    user_id: user_requests.user_id,
+                    username: users.username,
+                    created_at: user_requests.created_at
+                })
+                    .from(user_requests)
+                    .leftJoin(users, eq(user_requests.user_id, users.id))
+                    .where(eq(user_requests.status, 'pending'))
+                    .orderBy(desc(user_requests.created_at));
 
-                    return {
-                        ...doc,
-                        owner_id: tracking[0]?.uploader_id || null,
-                        owner_name: tracking[0]?.uploader_name || 'System'
+                // Enrich with Paperless document details
+                const enrichedResults = await Promise.all(pendingRequests.map(async (req: any) => {
+                    try {
+                        const doc = await PaperlessService.getDocument(req.paperless_id);
+                        return {
+                            id: doc.id, // Keep the document ID as key for viewing/downloading
+                            request_id: req.id, // The ID of the request record itself
+                            title: doc.title,
+                            owner_id: req.user_id,
+                            owner_name: req.username,
+                            created_date: req.created_at,
+                            created: req.created_at,
+                            tags: doc.tags || []
+                        }
+                    } catch (err) {
+                        return null; // Document might have been deleted in Paperless
                     }
                 }));
 
-                return { ...docs, results: enrichedResults }
+                // Filter out any null entries due to errors
+                const results = enrichedResults.filter(r => r !== null);
+
+                return { count: results.length, results }
             } catch (e: any) {
                 console.error('[API] Error fetching user requests:', e);
                 set.status = 500; return { error: e.message }
             }
         })
-        // User: List My Requests (Request & Rejected documents uploaded by me)
+        // User: List My Requests (from user_requests table)
         .get('/my-requests', async ({ user, set }) => {
             if (!user) {
                 set.status = 401; return 'Unauthorized'
             }
             try {
-                // Find all paperless IDs uploaded by the current user
-                const tracked = await db.select()
-                    .from(document_tracking)
-                    .where(eq(document_tracking.uploader_id, user.id));
+                const myRequests = await db.select({
+                    id: user_requests.id,
+                    paperless_id: user_requests.paperless_id,
+                    status: user_requests.status,
+                    comment: user_requests.comment,
+                    created_at: user_requests.created_at
+                })
+                    .from(user_requests)
+                    .where(eq(user_requests.user_id, user.id))
+                    .orderBy(desc(user_requests.created_at));
 
-                if (tracked.length === 0) {
-                    return { count: 0, results: [] }
-                }
-
-                const [requestDocs, rejectedDocs] = await Promise.all([
-                    PaperlessService.getDocuments('tag:Request'),
-                    PaperlessService.getDocuments('tag:Rejected')
-                ]);
-
-                const combinedDocs = [...(requestDocs.results || []), ...(rejectedDocs.results || [])];
-                const trackedDocIds = new Set(tracked.map(t => t.paperless_id));
-
-                // Filter docs that were uploaded by this user
-                const myDocs = combinedDocs.filter((doc: any) => trackedDocIds.has(doc.id));
-
-                // Query approvals for status and comment
-                const docDetails = await Promise.all(myDocs.map(async (doc: any) => {
-                    const approvalRec = await db.select()
-                        .from(approvals)
-                        .where(eq(approvals.paperless_doc_id, doc.id))
-                        .limit(1);
-                    
-                    return {
-                        ...doc,
-                        status: approvalRec[0]?.status || 'pending',
-                        comment: approvalRec[0]?.comment || ''
+                const enrichedResults = await Promise.all(myRequests.map(async (req: any) => {
+                    try {
+                        const doc = await PaperlessService.getDocument(req.paperless_id);
+                        return {
+                            id: doc.id,
+                            title: doc.title,
+                            status: req.status,
+                            comment: req.comment,
+                            created: req.created_at
+                        }
+                    } catch (err) {
+                        return null;
                     }
                 }));
 
-                return { count: docDetails.length, results: docDetails }
+                const results = enrichedResults.filter(r => r !== null);
+                return { count: results.length, results }
             } catch (e: any) {
                 console.error('[API] Error fetching my requests:', e);
                 set.status = 500; return { error: e.message }
             }
         })
-        // Approver: Approve
         // Approver: Approve
         .post('/approve/:id', async ({ params, user, set, body }) => {
             if (user?.role !== 'approver' && user?.role !== 'admin') {
@@ -322,23 +433,7 @@ const app = new Elysia()
                         .where(eq(document_tracking.paperless_id, docId));
                 }
 
-                // Check uploader role. If it is a standard user, automatically add them to userIds
                 const finalUserIds = [...(userIds || [])];
-                const tracking = await db.select({
-                    uploader_id: document_tracking.uploader_id,
-                    role: users.role
-                })
-                    .from(document_tracking)
-                    .leftJoin(users, eq(document_tracking.uploader_id, users.id))
-                    .where(eq(document_tracking.paperless_id, docId))
-                    .limit(1);
-
-                const uploaderId = tracking[0]?.uploader_id;
-                const uploaderRole = tracking[0]?.role;
-
-                if (uploaderId && uploaderRole === 'user' && !finalUserIds.includes(uploaderId)) {
-                    finalUserIds.push(uploaderId);
-                }
 
                 // Update approvals DB table status
                 const existing = await db.select().from(approvals).where(eq(approvals.paperless_doc_id, docId));
@@ -354,6 +449,17 @@ const app = new Elysia()
                         status: 'approved',
                         actor_id: user.id as number
                     })
+                }
+
+                // Update user_requests status for the approved users
+                if (finalUserIds && finalUserIds.length > 0) {
+                    await db.update(user_requests)
+                        .set({ status: 'approved' })
+                        .where(and(
+                            eq(user_requests.paperless_id, docId),
+                            inArray(user_requests.user_id, finalUserIds),
+                            eq(user_requests.status, 'pending')
+                        ));
                 }
 
                 // Fetch Usernames for Audit Log
@@ -412,17 +518,12 @@ const app = new Elysia()
                 // Remove Rejected and Approved and Pending and Request
                 currentTags = currentTags.filter((t: number) => t !== rejectedId && t !== approvedId && t !== pendingId && t !== requestId);
                 
-                // Check who uploaded it to decide whether to restore to Pending or Request
-                const tracking = await db.select({
-                    role: users.role
-                })
-                    .from(document_tracking)
-                    .leftJoin(users, eq(document_tracking.uploader_id, users.id))
-                    .where(eq(document_tracking.paperless_id, docId))
-                    .limit(1);
+                // Check if this document was requested by standard users
+                const requestsCount = await db.select()
+                    .from(user_requests)
+                    .where(eq(user_requests.paperless_id, docId));
 
-                const uploaderRole = tracking[0]?.role;
-                const isUserRequest = uploaderRole === 'user';
+                const isUserRequest = requestsCount.length > 0;
                 const restoreTagId = isUserRequest ? requestId : pendingId;
                 const restoreTagName = isUserRequest ? 'Request' : 'Pending';
 
@@ -430,8 +531,18 @@ const app = new Elysia()
 
                 await PaperlessService.setDocumentTags(docId, currentTags);
 
-                // Update DB status
+                // Update DB status for approvals
                 await db.update(approvals).set({ status: 'pending', comment: null }).where(eq(approvals.paperless_doc_id, docId));
+
+                // If user request, restore rejected requests to pending
+                if (isUserRequest) {
+                    await db.update(user_requests)
+                        .set({ status: 'pending', comment: null })
+                        .where(and(
+                            eq(user_requests.paperless_id, docId),
+                            eq(user_requests.status, 'rejected')
+                        ));
+                }
 
                 // Log Restore
                 await db.insert(audit_logs).values({
@@ -446,7 +557,7 @@ const app = new Elysia()
                 set.status = 500; return { error: e.message }
             }
         })
-        // Approver: Reject (Move to Rejected Tag)
+        // Approver: Reject Staff Uploaded document (Move to Rejected Tag)
         .post('/reject/:id', async ({ params, user, set, body }) => {
             if (user?.role !== 'approver' && user?.role !== 'admin') {
                 set.status = 403; return 'Forbidden'
@@ -500,6 +611,67 @@ const app = new Elysia()
 
                 return { success: true }
             } catch (e: any) {
+                set.status = 500; return { error: e.message }
+            }
+        })
+        // Approver: Reject specific User Request (from user_requests table)
+        .post('/reject-request/:id', async ({ params, user, set, body }) => {
+            if (user?.role !== 'approver' && user?.role !== 'admin') {
+                set.status = 403; return 'Forbidden'
+            }
+            const requestId = parseInt(params.id)
+            const { comment } = (body || {}) as { comment?: string }
+            try {
+                // Find request
+                const reqs = await db.select().from(user_requests).where(eq(user_requests.id, requestId));
+                if (reqs.length === 0) {
+                    set.status = 404; return { error: 'Request not found' }
+                }
+                const requestObj = reqs[0];
+
+                // Update request DB status
+                await db.update(user_requests).set({
+                    status: 'rejected',
+                    comment: comment || null
+                }).where(eq(user_requests.id, requestId));
+
+                // Check if there are other pending requests for the same document
+                const otherPending = await db.select()
+                    .from(user_requests)
+                    .where(and(
+                        eq(user_requests.paperless_id, requestObj.paperless_id),
+                        eq(user_requests.status, 'pending')
+                    ));
+
+                // If no more pending requests for this document, remove the Request tag from Paperless-ngx
+                if (otherPending.length === 0) {
+                    const docId = requestObj.paperless_id;
+                    const doc = await PaperlessService.getDocument(docId);
+                    const pendingId = await PaperlessService.getOrCreateTag('Pending');
+                    const approvedId = await PaperlessService.getOrCreateTag('Approved');
+                    const rejectedId = await PaperlessService.getOrCreateTag('Rejected');
+                    const requestIdTag = await PaperlessService.getOrCreateTag('Request');
+
+                    let currentTags = doc.tags || [];
+                    currentTags = currentTags.filter((t: number) => t !== requestIdTag && t !== approvedId && t !== pendingId);
+                    
+                    if (!currentTags.includes(pendingId)) {
+                        currentTags.push(pendingId); // Ensure it keeps/re-acquires the 'Pending' tag if not already there
+                    }
+                    await PaperlessService.setDocumentTags(docId, currentTags);
+                }
+
+                // Log Reject Event
+                await db.insert(audit_logs).values({
+                    user_id: user.id as number,
+                    action: 'REJECT_REQUEST',
+                    target_id: String(requestObj.paperless_id),
+                    details: `Rejected access request ID ${requestId} by ${user.username}. Comment: ${comment || 'None'}`
+                });
+
+                return { success: true }
+            } catch (e: any) {
+                console.error('[API] Error rejecting user request:', e);
                 set.status = 500; return { error: e.message }
             }
         })

@@ -40,3 +40,12 @@ export const audit_logs = mysqlTable("audit_logs", {
     details: text("details"),
     created_at: timestamp("created_at").defaultNow(),
 });
+
+export const user_requests = mysqlTable("user_requests", {
+    id: serial("id").primaryKey(),
+    paperless_id: int("paperless_id").notNull(),
+    user_id: int("user_id").references(() => users.id),
+    status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+    comment: text("comment"),
+    created_at: timestamp("created_at").defaultNow(),
+});

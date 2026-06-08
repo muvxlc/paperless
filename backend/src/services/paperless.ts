@@ -88,6 +88,37 @@ export const PaperlessService = {
         return response.json();
     },
 
+    // Get documents with advanced query filters, pagination, and tags
+    async getDocumentsAdvanced(options: { tagId?: number; query?: string; page?: number; page_size?: number; ordering?: string }) {
+        const params = new URLSearchParams();
+        if (options.tagId) {
+            params.append('tags__id__all', options.tagId.toString());
+        }
+        if (options.query) {
+            params.append('query', options.query);
+        }
+        if (options.page) {
+            params.append('page', options.page.toString());
+        }
+        if (options.page_size) {
+            params.append('page_size', options.page_size.toString());
+        }
+        if (options.ordering) {
+            params.append('ordering', options.ordering);
+        } else {
+            params.append('ordering', '-created'); // Default order newest first
+        }
+
+        const response = await fetch(`${PAPERLESS_API_URL}/documents/?${params.toString()}`, {
+            headers: getHeaders(),
+        });
+        if (!response.ok) {
+            const txt = await response.text();
+            throw new Error(`Paperless API Error (GetDocsAdvanced): ${response.status} ${txt}`);
+        }
+        return response.json();
+    },
+
     // Get documents by Tag ID
     async getDocumentsByTag(tagId: number) {
         const response = await fetch(`${PAPERLESS_API_URL}/documents/?tags__id__all=${tagId}`, {
