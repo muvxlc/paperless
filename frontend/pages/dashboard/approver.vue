@@ -1,53 +1,115 @@
 <template>
-  <div class="p-8">
-    <div class="flex justify-between items-center mb-6">
-      <h1 class="text-2xl font-bold">Approver Dashboard</h1>
-      <div class="flex items-center gap-4">
-        <span class="text-sm text-gray-500">Filter by Uploader:</span>
+  <div class="space-y-8">
+    <!-- Header with controls -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-800 dark:text-white">Approver Dashboard</h1>
+        <p class="text-xs text-gray-400 mt-0.5">Review, approve, or reject uploaded documents.</p>
+      </div>
+      <div class="flex items-center gap-3 w-full sm:w-auto">
+        <span class="text-xs font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">Filter by Uploader:</span>
         <USelect v-model="selectedUser" :options="userOptions" placeholder="All Users" class="w-48" />
         <UButton icon="i-heroicons-arrow-path" color="gray" variant="ghost" @click="fetchData(true)" :loading="pending" />
       </div>
     </div>
 
+    <!-- Stats Summary Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+      <!-- Pending Card -->
+      <div class="bg-gradient-to-br from-blue-400 to-indigo-500 p-5 rounded-2xl text-white shadow-xs relative overflow-hidden group hover:scale-[1.02] transition-transform duration-200 cursor-pointer" @click="activeTab = 0">
+        <div class="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-300">
+          <UIcon name="i-heroicons-clock" class="w-20 h-20" />
+        </div>
+        <p class="text-xs opacity-90 font-medium mb-1">Pending Review</p>
+        <p class="text-3xl font-extrabold tracking-tight">{{ pendingDocs.length }}</p>
+        <p class="text-[11px] opacity-75 mt-1">Requires approval</p>
+      </div>
+
+      <!-- Approved Card -->
+      <div class="bg-gradient-to-br from-emerald-400 to-teal-500 p-5 rounded-2xl text-white shadow-xs relative overflow-hidden group hover:scale-[1.02] transition-transform duration-200 cursor-pointer" @click="activeTab = 1">
+        <div class="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-300">
+          <UIcon name="i-heroicons-check-circle" class="w-20 h-20" />
+        </div>
+        <p class="text-xs opacity-90 font-medium mb-1">Approved Documents</p>
+        <p class="text-3xl font-extrabold tracking-tight">{{ approvedDocs.length }}</p>
+        <p class="text-[11px] opacity-75 mt-1">Granted user access</p>
+      </div>
+
+      <!-- Rejected Card -->
+      <div class="bg-gradient-to-br from-red-400 to-rose-500 p-5 rounded-2xl text-white shadow-xs relative overflow-hidden group hover:scale-[1.02] transition-transform duration-200 cursor-pointer" @click="activeTab = 2">
+        <div class="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-300">
+          <UIcon name="i-heroicons-x-circle" class="w-20 h-20" />
+        </div>
+        <p class="text-xs opacity-90 font-medium mb-1">Rejected Documents</p>
+        <p class="text-3xl font-extrabold tracking-tight">{{ rejectedDocs.length }}</p>
+        <p class="text-[11px] opacity-75 mt-1">Declined access</p>
+      </div>
+    </div>
+
+    <!-- Tabs and Document Queue -->
     <UTabs :items="tabs" v-model="activeTab" class="w-full">
       <template #item="{ item }">
         <div class="mt-4">
-          <div v-if="pending" class="text-center py-10">
-             <UIcon name="i-heroicons-arrow-path" class="animate-spin text-4xl text-gray-400" />
+          <div v-if="pending" class="text-center py-12">
+            <UIcon name="i-heroicons-arrow-path" class="animate-spin text-4xl text-gray-400" />
           </div>
           
-          <div v-else-if="filteredDocs.length === 0" class="text-gray-500 text-center py-10 border-2 border-dashed border-gray-200 rounded-lg">
-            No documents found in "{{ item.label }}".
+          <div v-else-if="filteredDocs.length === 0" class="text-gray-500 dark:text-gray-400 text-center py-12 border border-dashed border-gray-200 dark:border-gray-800 rounded-xl">
+            <UIcon name="i-heroicons-folder-open" class="w-12 h-12 text-gray-300 dark:text-gray-700 mx-auto mb-3" />
+            <p class="font-medium text-sm">No documents found</p>
+            <p class="text-xs text-gray-400 mt-1">There are no files in the "{{ item.label }}" state matching the filters.</p>
           </div>
 
           <div v-else class="grid gap-4">
-            <UCard v-for="doc in filteredDocs" :key="doc.id" class="hover:shadow-md transition-shadow">
-              <div class="flex justify-between items-center">
-                <div class="flex items-start gap-4">
-                  <UIcon :name="item.key === 'pending' ? 'i-heroicons-document-magnifying-glass' : 'i-heroicons-check-badge'" 
-                         :class="item.key === 'pending' ? 'text-blue-500' : 'text-green-500'" 
-                         class="text-2xl mt-1" />
-                  <div>
-                    <h3 class="font-semibold text-lg">{{ doc.title }}</h3>
-                    <div class="flex items-center gap-2 text-sm text-gray-500 mt-1">
-                       <UBadge size="xs" color="gray" variant="soft" icon="i-heroicons-user">{{ doc.owner_name || 'System' }}</UBadge>
-                       <span>&bull;</span>
-                       <span>Uploaded: {{ formatTimestamp(doc.created_date || doc.created) }}</span>
+            <UCard 
+              v-for="doc in filteredDocs" 
+              :key="doc.id" 
+              class="hover:shadow-md transition-shadow ring-1 ring-gray-100 dark:ring-gray-800"
+            >
+              <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div class="flex items-start gap-4 min-w-0 flex-1">
+                  <div class="p-2 bg-gray-50 dark:bg-gray-800 rounded-xl text-gray-500 shrink-0">
+                    <UIcon 
+                      :name="item.key === 'pending' ? 'i-heroicons-document-magnifying-glass' : (item.key === 'approved' ? 'i-heroicons-check-badge' : 'i-heroicons-x-circle')" 
+                      :class="['text-2xl', item.key === 'pending' ? 'text-blue-500' : (item.key === 'approved' ? 'text-green-500' : 'text-red-500')]" 
+                    />
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <h3 class="font-bold text-gray-800 dark:text-white truncate">{{ doc.title }}</h3>
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 mt-1.5">
+                      <span class="flex items-center gap-1">
+                        <UIcon name="i-heroicons-user" class="w-3.5 h-3.5" />
+                        Uploaded by: <span class="font-semibold text-orange-500">{{ doc.owner_name || 'System' }}</span>
+                      </span>
+                      <span>&bull;</span>
+                      <span class="flex items-center gap-1">
+                        <UIcon name="i-heroicons-calendar" class="w-3.5 h-3.5" />
+                        Uploaded: {{ formatTimestamp(doc.created_date || doc.created) }}
+                      </span>
+                      <span v-if="doc.expires_at" class="flex items-center gap-1 text-red-500">
+                        <span>&bull;</span>
+                        <UIcon name="i-heroicons-clock" class="w-3.5 h-3.5" />
+                        Expires: {{ formatTimestamp(doc.expires_at) }}
+                      </span>
                     </div>
                   </div>
                 </div>
                 
-                <div class="flex gap-2">
+                <div class="flex items-center gap-2 self-end sm:self-center shrink-0">
                   <!-- View: All Tabs -->
-                  <UButton color="gray" variant="ghost" icon="i-heroicons-eye" :to="`${config.public.apiBase}/api/download/${doc.id}?token=${auth.token}`" target="_blank">View</UButton>
+                  <UButton color="gray" variant="ghost" icon="i-heroicons-eye" :to="`${config.public.apiBase}/api/download/${doc.id}?token=${auth.token}`" target="_blank">
+                    View
+                  </UButton>
                   
                   <!-- Approve: Pending & Rejected -->
-                  <UButton v-if="item.key === 'pending' || item.key === 'rejected'" color="green" icon="i-heroicons-check" @click="openApproveModal(doc.id)">Approve</UButton>
+                  <UButton v-if="item.key === 'pending' || item.key === 'rejected'" color="green" icon="i-heroicons-check" @click="openApproveModal(doc.id)">
+                    Approve
+                  </UButton>
                   
                   <!-- Reject: Pending Only -->
                   <UButton v-if="item.key === 'pending'" color="red" variant="soft" icon="i-heroicons-x-mark" label="Reject" @click="reject(doc.id)" />
                   
-                  <!-- Undo Approval: Approved Only (Moves back to Pending) -->
+                  <!-- Undo Approval: Approved Only -->
                   <UButton v-if="item.key === 'approved'" color="orange" variant="soft" icon="i-heroicons-arrow-uturn-left" label="Undo Approval" @click="restore(doc.id, true)" />
 
                   <!-- Restore: Rejected Only -->
@@ -92,9 +154,9 @@
 
             <hr class="border-gray-200 dark:border-gray-700" />
 
-            <p class="text-sm text-gray-500">Select users who are allowed to see this document:</p>
+            <p class="text-xs text-gray-500 mb-2">Select users who are allowed to see this document:</p>
             
-            <div class="max-h-60 overflow-y-auto space-y-2 border rounded p-2">
+            <div class="max-h-60 overflow-y-auto space-y-2 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
                 <div v-for="u in targetUsers" :key="u.id" class="flex items-center gap-2">
                     <UCheckbox :id="`user-${u.id}`" v-model="selectedUserIds" :value="u.id" :label="u.username" />
                 </div>
@@ -119,6 +181,8 @@
 </template>
 
 <script setup>
+import { ref, computed, onMounted, watch } from 'vue'
+
 const config = useRuntimeConfig()
 const auth = useAuthStore()
 const pendingDocs = ref([])
@@ -197,7 +261,7 @@ async function confirmApprove() {
         })
         
         isApproveModalOpen.value = false
-        fetchData()
+        fetchData(true)
     } catch (err) {
         alert('Failed to approve: ' + err.message)
     } finally {
@@ -228,33 +292,30 @@ async function fetchUsers() {
 async function fetchData(forceRefetch = false) {
   pending.value = true
   try {
-    let endpoint = '/api/pending'
-    if (activeTab.value === 1) endpoint = '/api/approved'
-    else if (activeTab.value === 2) endpoint = '/api/rejected'
-
-    const data = await $fetch(`${config.public.apiBase}${endpoint}`, {
+    const [pendingRes, approvedRes, rejectedRes] = await Promise.all([
+      $fetch(`${config.public.apiBase}/api/pending`, {
         headers: { 'Authorization': `Bearer ${auth.token}` },
         params: forceRefetch ? { t: Date.now() } : {}
-    })
+      }),
+      $fetch(`${config.public.apiBase}/api/approved`, {
+        headers: { 'Authorization': `Bearer ${auth.token}` },
+        params: forceRefetch ? { t: Date.now() } : {}
+      }),
+      $fetch(`${config.public.apiBase}/api/rejected`, {
+        headers: { 'Authorization': `Bearer ${auth.token}` },
+        params: forceRefetch ? { t: Date.now() } : {}
+      })
+    ])
     
-    if (activeTab.value === 0) {
-      pendingDocs.value = data?.results || (Array.isArray(data) ? data : [])
-    } else if (activeTab.value === 1) {
-      approvedDocs.value = data?.results || (Array.isArray(data) ? data : [])
-    } else {
-      rejectedDocs.value = data?.results || (Array.isArray(data) ? data : [])
-    }
+    pendingDocs.value = pendingRes?.results || (Array.isArray(pendingRes) ? pendingRes : [])
+    approvedDocs.value = approvedRes?.results || (Array.isArray(approvedRes) ? approvedRes : [])
+    rejectedDocs.value = rejectedRes?.results || (Array.isArray(rejectedRes) ? rejectedRes : [])
   } catch (err) {
     console.error('Fetch data error:', err)
-    if (activeTab.value === 2) rejectedDocs.value = [] // clear on error
   } finally {
     pending.value = false
   }
 }
-
-watch(activeTab, () => {
-  fetchData()
-})
 
 async function reject(id) {
   if (!confirm('Are you sure you want to reject this document?')) return
@@ -264,7 +325,7 @@ async function reject(id) {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${auth.token}` }
     })
-    fetchData()
+    fetchData(true)
   } catch (err) {
     alert('Failed to reject: ' + err.message)
   }
@@ -278,7 +339,7 @@ async function restore(id, isUndo = false) {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${auth.token}` }
         })
-        fetchData()
+        fetchData(true)
     } catch (err) {
         alert('Failed to restore: ' + err.message)
     }
