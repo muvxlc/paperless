@@ -106,6 +106,47 @@ const app = new Elysia()
                 title: t.Optional(t.String())
             })
         })
+        // Staff: Get task status
+        .get('/upload/status/:taskId', async ({ params, user, set }) => {
+            if (user?.role !== 'staff' && user?.role !== 'admin') {
+                set.status = 403
+                return 'Forbidden'
+            }
+
+            const taskId = params.taskId
+            try {
+                const data = await PaperlessService.getTaskStatus(taskId)
+                const task = data.results && data.results[0]
+
+                if (task) {
+                    // Task status in Paperless: PENDING, STARTED, SUCCESS, FAILURE, REVOKED
+                    if (task.status === 'SUCCESS' && task.related_document) {
+                        const docId = parseInt(task.related_document)
+                        
+                        // Check if already tracked, if not insert to document_tracking
+                        const existingTracking = await db.select().from(document_tracking).where(eq(document_tracking.paperless_id, docId))
+                        if (existingTracking.length === 0 && user?.id) {
+                            await db.insert(document_tracking).values({
+                                paperless_id: docId,
+                                uploader_id: user.id as number
+                            })
+                        }
+                    }
+
+                    return { 
+                        status: task.status, 
+                        task_id: task.task_id,
+                        related_document: task.related_document,
+                        error: task.result 
+                    }
+                }
+
+                return { status: 'PENDING' }
+            } catch (e: any) {
+                set.status = 500
+                return { error: e.message }
+            }
+        })
         // Approver: List Pending
         .get('/pending', async ({ user, set }) => {
             if (user?.role !== 'approver' && user?.role !== 'admin') {

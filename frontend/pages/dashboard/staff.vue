@@ -147,6 +147,10 @@
                           <UIcon name="i-heroicons-check-circle" class="w-4 h-4 mr-1 flex-shrink-0" />
                           Uploaded successfully
                         </span>
+                        <span v-else-if="item.status === 'processing'" class="text-xs text-orange-500 dark:text-orange-400 flex items-center font-medium">
+                          <UIcon name="i-heroicons-arrow-path" class="w-4 h-4 mr-1 animate-spin flex-shrink-0" />
+                          Processing (OCR & indexing)...
+                        </span>
                         <span v-else-if="item.status === 'failed'" class="text-xs text-red-500 dark:text-red-400 flex items-center font-medium truncate max-w-md">
                           <UIcon name="i-heroicons-exclamation-triangle" class="w-4 h-4 mr-1 flex-shrink-0" />
                           {{ item.error || 'Upload failed' }}
@@ -279,7 +283,7 @@ function clearAll() {
 
 // Upload a single file item (used for retry or sequential uploads)
 async function uploadSingle(item) {
-  if (item.status === 'success') return true
+  if (item.status === 'success' || item.status === 'processing') return true
   
   item.status = 'uploading'
   item.error = ''
@@ -301,7 +305,19 @@ async function uploadSingle(item) {
       body: formData
     })
     
-    item.status = 'success'
+    // Extract task ID from response
+    const taskId = typeof response.result === 'string' 
+      ? response.result 
+      : (response.result?.taskId || response.result?.task_id)
+
+    if (taskId) {
+      item.status = 'processing'
+      // Start polling task status in the background so next file upload isn't blocked
+      pollTaskStatus(item, taskId)
+    } else {
+      // If no task ID (synchronous upload), mark success immediately
+      item.status = 'success'
+    }
     return true
   } catch (err) {
     console.error('Upload error for file:', item.name, err)
@@ -311,14 +327,53 @@ async function uploadSingle(item) {
   }
 }
 
+// Poll Paperless-ngx task queue for the document processing status
+async function pollTaskStatus(item, taskId) {
+  const maxRetries = 60 // 120 seconds maximum polling time
+  let retries = 0
+  
+  while (retries < maxRetries) {
+    try {
+      const response = await $fetch(`${config.public.apiBase}/api/upload/status/${taskId}`, {
+        headers: {
+          'Authorization': `Bearer ${auth.token}`
+        }
+      })
+      
+      // Paperless statuses: PENDING, STARTED, SUCCESS, FAILURE, REVOKED
+      if (response.status === 'SUCCESS') {
+        item.status = 'success'
+        return true
+      } else if (response.status === 'FAILURE') {
+        item.status = 'failed'
+        item.error = response.error || 'OCR processing failed'
+        return false
+      } else if (response.status === 'REVOKED') {
+        item.status = 'failed'
+        item.error = 'Task was revoked'
+        return false
+      }
+    } catch (err) {
+      console.error('Error polling status for task:', taskId, err)
+    }
+    
+    retries++
+    await new Promise(resolve => setTimeout(resolve, 2000)) // Poll every 2 seconds
+  }
+  
+  item.status = 'failed'
+  item.error = 'Processing timeout. Document is likely still processing in the background.'
+  return false
+}
+
 // Upload all files in the queue sequentially
 async function uploadAll() {
   if (filesList.value.length === 0) return
   
   uploading.value = true
   
-  // Only upload files that are not already successfully uploaded
-  const pendingFiles = filesList.value.filter(f => f.status !== 'success')
+  // Only upload files that are not already successfully uploaded or processing
+  const pendingFiles = filesList.value.filter(f => f.status !== 'success' && f.status !== 'processing')
   
   for (const item of pendingFiles) {
     await uploadSingle(item)
