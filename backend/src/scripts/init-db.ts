@@ -1,5 +1,4 @@
 import mysql from "mysql2/promise";
-import mysql from "mysql2/promise";
 
 declare var Bun: any; // Declare global for TS (runtime uses global Bun)
 
@@ -81,6 +80,20 @@ async function initDB() {
             );
         `);
         console.log(" - Checked/Created table: audit_logs");
+
+        // 6. User Requests
+        await connection.execute(`
+            CREATE TABLE IF NOT EXISTS user_requests (
+                id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                paperless_id INT NOT NULL,
+                user_id BIGINT UNSIGNED,
+                status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+                comment TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+        `);
+        console.log(" - Checked/Created table: user_requests");
 
         // --- Seed Admin ---
         console.log("[Init] Checking for admin user...");

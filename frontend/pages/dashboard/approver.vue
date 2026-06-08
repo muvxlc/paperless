@@ -122,7 +122,7 @@
                   </UButton>
                   
                   <!-- Reject: Pending & Requests Only -->
-                  <UButton v-if="item.key === 'pending' || item.key === 'requests'" color="red" variant="soft" icon="i-heroicons-x-mark" label="Reject" @click="reject(doc.id)" />
+                  <UButton v-if="item.key === 'pending' || item.key === 'requests'" color="red" variant="soft" icon="i-heroicons-x-mark" label="Reject" @click="reject(doc.id, item.key === 'requests' ? doc.request_id : null)" />
                   
                   <!-- Undo Approval: Approved Only -->
                   <UButton v-if="item.key === 'approved'" color="orange" variant="soft" icon="i-heroicons-arrow-uturn-left" label="Undo Approval" @click="restore(doc.id, true)" />
@@ -340,12 +340,16 @@ async function fetchData(forceRefetch = false) {
   }
 }
 
-async function reject(id) {
+async function reject(id, requestId = null) {
   const comment = prompt('โปรดระบุเหตุผลในการปฏิเสธคำขอนี้ (ไม่บังคับ):')
   if (comment === null) return // User cancelled the prompt
 
   try {
-    await $fetch(`${config.public.apiBase}/api/reject/${id}`, {
+    const url = requestId 
+      ? `${config.public.apiBase}/api/reject-request/${requestId}` 
+      : `${config.public.apiBase}/api/reject/${id}`;
+      
+    await $fetch(url, {
         method: 'POST',
         body: { comment },
         headers: { 'Authorization': `Bearer ${auth.token}` }
