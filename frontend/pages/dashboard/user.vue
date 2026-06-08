@@ -128,7 +128,7 @@
                 </div>
             </template>
 
-            <div class="w-full h-full bg-gray-100 flex items-center justify-center relative group" @contextmenu.prevent>
+            <div class="w-full h-full bg-gray-900 dark:bg-gray-950 flex items-center justify-center relative group" @contextmenu.prevent>
                 <iframe v-if="currentDocUrl" 
                         :src="currentDocUrl" 
                         class="w-full h-[85vh] border-none"
