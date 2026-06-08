@@ -7,6 +7,18 @@ import { db } from './db'
 import { approvals, document_tracking, users, document_permissions, audit_logs } from './db/schema'
 import { eq, desc, and, inArray, lt, sql } from 'drizzle-orm'
 
+// Memory storage for short-lived, one-time document view tokens
+const viewTokens = new Map<string, { docId: number; userId: number; expiresAt: number }>();
+
+function cleanExpiredTokens() {
+    const now = Date.now();
+    for (const [token, data] of viewTokens.entries()) {
+        if (data.expiresAt < now) {
+            viewTokens.delete(token);
+        }
+    }
+}
+
 const app = new Elysia()
     .use(cors({
         origin: true, // Allow all origins (or specify 'https://paperless.bangkhan.com')
@@ -431,14 +443,10 @@ const app = new Elysia()
         })
         // Download/View document
         .get('/download/:id', async ({ params, set, user, query, jwt }: any) => {
-            if (!user) {
-                set.status = 401; return 'Unauthorized'
-            }
-
-            const docId = parseInt(params.id);
             // Audit Log: VIEW
             let userId = null;
             if (user) userId = user.id;
+            
             // If user is missing (e.g. valid token but extraction failed?), we log as System or Anonymous?
             // Let's verify token from query if user is null
             if (!userId && query.token) {
@@ -446,46 +454,77 @@ const app = new Elysia()
                 if (profile) userId = profile.id;
             }
 
-            if (userId) {
+            if (!userId) {
+                set.status = 401; return 'Unauthorized'
+            }
+
+            const docId = parseInt(params.id);
+
+            try {
+                // Permission Check
+                // Fetch user role
+                const u = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+                const userRole = u[0]?.role;
+
+                let isAuthorized = false;
+                let forceInline = false;
+
+                if (userRole === 'admin' || userRole === 'approver' || userRole === 'staff') {
+                    isAuthorized = true;
+                } else if (userRole === 'user') {
+                    // Check permissions
+                    const perm = await db.select().from(document_permissions)
+                        .where(and(
+                            eq(document_permissions.paperless_id, docId),
+                            eq(document_permissions.user_id, userId)
+                        ));
+                    
+                    if (perm.length > 0) {
+                        const canDownload = perm[0].can_download;
+                        if (canDownload) {
+                            isAuthorized = true;
+                        } else {
+                            // If user is restricted to View-Only (can_download is false), 
+                            // we only authorize if they provide a valid one-time view token.
+                            const viewToken = query.view_token;
+                            if (viewToken) {
+                                const storedToken = viewTokens.get(viewToken);
+                                if (storedToken && storedToken.docId === docId && storedToken.userId === userId && storedToken.expiresAt >= Date.now()) {
+                                    isAuthorized = true;
+                                    forceInline = true; // Force inline headers for view-only
+                                    viewTokens.delete(viewToken); // Consume one-time token immediately!
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!isAuthorized) {
+                    set.status = 403; return 'Forbidden';
+                }
+
+                // Log the VIEW audit action
                 await db.insert(audit_logs).values({
                     user_id: userId,
                     action: 'VIEW',
                     target_id: String(docId),
-                    details: 'Document Followed/Downloaded'
+                    details: forceInline ? 'Restricted view (No download)' : 'Document downloaded/accessed'
                 })
-            }
-
-            try {
-                // Permission Check
-                if (userId) {
-                    // Fetch user role
-                    const u = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-                    if (u.length > 0 && u[0].role === 'user') {
-                        // Check permissions
-                        const perm = await db.select().from(document_permissions)
-                            .where(and(
-                                eq(document_permissions.paperless_id, docId),
-                                eq(document_permissions.user_id, userId)
-                            ));
-                        if (perm.length === 0) {
-                            set.status = 403; return 'Forbidden';
-                        }
-                        // Also check if view_only?
-                        // If this is the /download endpoint, and user has can_download=false...
-                        // Should we block?
-                        // The Requirement says: "Restricted Viewer (No Toolbar)... Default View Only".
-                        // If can_download is false, they should use /view (HTML wrapper).
-                        // If they try /download directly... we should probably block standard download if we can distinguish?
-                        // Or we serve the PDF with headers that force inline?
-                        // If can_download=false, we might want to prevent "Attachment" disposition.
-                    }
-                }
 
                 const response = await PaperlessService.downloadDocument(docId);
 
-                // Forward content-type and disposition if possible
+                // Forward headers
                 const contentType = response.headers.get('content-type');
                 if (contentType) set.headers['content-type'] = contentType;
+
+                if (forceInline) {
+                    set.headers['content-disposition'] = 'inline';
+                    // Extra security headers to block downloads in PDF viewer plugins
+                    set.headers['cache-control'] = 'no-store, no-cache, must-revalidate, max-age=0';
+                } else {
+                    const contentDisp = response.headers.get('content-disposition');
+                    if (contentDisp) set.headers['content-disposition'] = contentDisp;
+                }
 
                 return await response.arrayBuffer();
             } catch (e: any) {
@@ -493,95 +532,177 @@ const app = new Elysia()
             }
         })
         // View Wrapper (HTML with Right Click Protection)
-        .get('/view/:id', async ({ params, query, user, set }: any) => {
+        .get('/view/:id', async ({ params, query, user, set, jwt }: any) => {
             const docId = parseInt(params.id);
             // Auth Check
             let userId = null;
             let token = query.token;
             if (user) { userId = user.id; }
             else if (token) {
-                const profile = await app.jwt.verify(token);
+                const profile = await jwt.verify(token);
                 if (profile) userId = profile.id;
             }
 
             if (!userId) { set.status = 401; return 'Unauthorized'; }
 
-            // PDF.js Secure Viewer
-            return new Response(`
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Secure View</title>
-                    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-                    <style>
-                        body, html { margin: 0; padding: 0; background-color: #525659; height: 100%; overflow: auto; }
-                        #canvas-container { 
-                            display: flex; 
-                            flex-direction: column; 
-                            align-items: center; 
-                            padding: 20px; 
-                        }
-                        canvas { 
-                            box-shadow: 0 4px 8px rgba(0,0,0,0.2); 
-                            margin-bottom: 20px;
-                        }
-                    </style>
-                </head>
-                <body oncontextmenu="return false;">
-                    <div id="canvas-container"></div>
+            try {
+                // Verify user has permission to view the document
+                const u = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+                const userRole = u[0]?.role;
+                
+                if (userRole === 'user') {
+                    const perm = await db.select().from(document_permissions)
+                        .where(and(
+                            eq(document_permissions.paperless_id, docId),
+                            eq(document_permissions.user_id, userId)
+                        ));
+                    if (perm.length === 0) {
+                        set.status = 403; return 'Forbidden';
+                    }
+                }
 
-                    <script>
-                        // Block events
-                        document.addEventListener('contextmenu', event => event.preventDefault());
-                        document.onkeydown = function(e) {
-                             if (e.keyCode == 123) { return false; } // F12
-                             if (e.ctrlKey && e.shiftKey && e.keyCode == 'I'.charCodeAt(0)) { return false; } 
-                             if (e.ctrlKey && e.shiftKey && e.keyCode == 'C'.charCodeAt(0)) { return false; } 
-                             if (e.ctrlKey && e.shiftKey && e.keyCode == 'J'.charCodeAt(0)) { return false; } 
-                             if (e.ctrlKey && e.keyCode == 'U'.charCodeAt(0)) { return false; } 
-                        };
+                // Generate short-lived, one-time view token
+                const viewToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
+                cleanExpiredTokens();
+                viewTokens.set(viewToken, { docId, userId, expiresAt: Date.now() + 15000 }); // Valid for 15 seconds
 
-                        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
-                        const url = '/api/download/${docId}?token=${token}';
-
-                        async function renderPDF() {
-                            try {
-                                const loadingTask = pdfjsLib.getDocument(url);
-                                const pdf = await loadingTask.promise;
-                                const container = document.getElementById('canvas-container');
-
-                                for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-                                    const page = await pdf.getPage(pageNum);
-                                    const scale = 1.5;
-                                    const viewport = page.getViewport({scale: scale});
-
-                                    const canvas = document.createElement('canvas');
-                                    const context = canvas.getContext('2d');
-                                    canvas.height = viewport.height;
-                                    canvas.width = viewport.width;
-
-                                    container.appendChild(canvas);
-
-                                    const renderContext = {
-                                        canvasContext: context,
-                                        viewport: viewport
-                                    };
-                                    await page.render(renderContext).promise;
-                                }
-                            } catch (err) {
-                                console.error('Error rendering PDF:', err);
-                                document.body.innerHTML = '<h2 style="color:white;text-align:center;margin-top:20px;">Error loading document.</h2>';
+                // PDF.js Secure Viewer
+                return new Response(`
+                    <!DOCTYPE html>
+                    <html lang="th">
+                    <head>
+                        <meta charset="UTF-8">
+                        <title>Secure View</title>
+                        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+                        <style>
+                            body, html { 
+                                margin: 0; 
+                                padding: 0; 
+                                background-color: #1a1a1a; 
+                                height: 100%; 
+                                overflow-y: auto; 
+                                user-select: none;
+                                -webkit-user-select: none;
+                                -moz-user-select: none;
+                                -ms-user-select: none;
                             }
-                        }
-
-                        renderPDF();
-                    </script>
-                </body>
-                </html>
-            `, {
-                headers: { 'Content-Type': 'text/html' }
-            });
+                            #canvas-container { 
+                                display: flex; 
+                                flex-direction: column; 
+                                align-items: center; 
+                                padding: 20px; 
+                                box-sizing: border-box;
+                            }
+                            .canvas-wrapper {
+                                position: relative;
+                                margin-bottom: 24px;
+                                box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+                                border-radius: 4px;
+                                overflow: hidden;
+                                width: 100%;
+                                max-width: 850px; /* Capped for desktop readability */
+                            }
+                            canvas { 
+                                display: block;
+                                width: 100% !important;
+                                height: auto !important;
+                            }
+                            .canvas-overlay {
+                                position: absolute;
+                                top: 0;
+                                left: 0;
+                                width: 100%;
+                                height: 100%;
+                                z-index: 10;
+                                background-color: rgba(255, 255, 255, 0.0);
+                                cursor: default;
+                            }
+                            @media print {
+                                body, html, #canvas-container, .canvas-wrapper, canvas { 
+                                    display: none !important; 
+                                }
+                            }
+                        </style>
+                    </head>
+                    <body oncontextmenu="return false;" onselectstart="return false;" ondragstart="return false;">
+                        <div id="canvas-container"></div>
+    
+                        <script>
+                            // Block context menu
+                            document.addEventListener('contextmenu', event => event.preventDefault());
+                            
+                            // Block printing, saving and DevTools shortcuts
+                            document.addEventListener('keydown', function(e) {
+                                 // F12 key
+                                 if (e.keyCode == 123) { e.preventDefault(); return false; }
+                                 // Ctrl+Shift+I, J, C (Chrome DevTools)
+                                 if (e.ctrlKey && e.shiftKey && (e.keyCode == 73 || e.keyCode == 74 || e.keyCode == 67)) { e.preventDefault(); return false; }
+                                 // Cmd+Alt+I (Mac DevTools)
+                                 if (e.metaKey && e.altKey && e.keyCode == 73) { e.preventDefault(); return false; }
+                                 // Ctrl+S / Cmd+S (Save)
+                                 if ((e.ctrlKey || e.metaKey) && e.keyCode == 83) { e.preventDefault(); return false; }
+                                 // Ctrl+P / Cmd+P (Print)
+                                 if ((e.ctrlKey || e.metaKey) && e.keyCode == 80) { e.preventDefault(); return false; }
+                                 // Ctrl+U / Cmd+U (View Source)
+                                 if ((e.ctrlKey || e.metaKey) && e.keyCode == 85) { e.preventDefault(); return false; }
+                            });
+    
+                            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    
+                            // Request using both query auth token and the one-time view token
+                            const url = '/api/download/${docId}?token=${token}&view_token=${viewToken}';
+    
+                            async function renderPDF() {
+                                try {
+                                    const loadingTask = pdfjsLib.getDocument(url);
+                                    const pdf = await loadingTask.promise;
+                                    const container = document.getElementById('canvas-container');
+    
+                                    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                                        const page = await pdf.getPage(pageNum);
+                                        const scale = 1.5;
+                                        const viewport = page.getViewport({scale: scale});
+    
+                                        // Create wrapper to contain canvas and transparent overlay
+                                        const wrapper = document.createElement('div');
+                                        wrapper.className = 'canvas-wrapper';
+                                        
+                                        const canvas = document.createElement('canvas');
+                                        const context = canvas.getContext('2d');
+                                        canvas.height = viewport.height;
+                                        canvas.width = viewport.width;
+                                        
+                                        // Create transparent overlay to block drag, drop and right-click on canvas
+                                        const overlay = document.createElement('div');
+                                        overlay.className = 'canvas-overlay';
+                                        
+                                        wrapper.appendChild(canvas);
+                                        wrapper.appendChild(overlay);
+                                        container.appendChild(wrapper);
+    
+                                        const renderContext = {
+                                            canvasContext: context,
+                                            viewport: viewport
+                                        };
+                                        await page.render(renderContext).promise;
+                                    }
+                                } catch (err) {
+                                    console.error('Error rendering PDF:', err);
+                                    document.body.innerHTML = '<h2 style="color:white;text-align:center;margin-top:40px;font-family:sans-serif;">ไม่สามารถโหลดเอกสารได้ หรือสิทธิ์การเข้าชมหมดอายุ</h2>';
+                                }
+                            }
+    
+                            renderPDF();
+                        </script>
+                    </body>
+                    </html>
+                `, {
+                    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+                });
+            } catch (err: any) {
+                set.status = 500;
+                return { error: err.message };
+            }
         })
         // Audit Logs (Admin Only) - with Search & Pagination
         .get('/logs', async ({ user, set, query }: any) => {
