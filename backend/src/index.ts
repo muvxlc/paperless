@@ -497,6 +497,8 @@ const app = new Elysia()
                             }
                         }
                     }
+                if (isAuthorized && query.inline === 'true') {
+                    forceInline = true;
                 }
 
                 if (!isAuthorized) {

@@ -97,7 +97,7 @@
                 
                 <div class="flex items-center gap-2 self-end sm:self-center shrink-0">
                   <!-- View: All Tabs -->
-                  <UButton color="gray" variant="ghost" icon="i-heroicons-eye" :to="`${config.public.apiBase}/api/download/${doc.id}?token=${auth.token}`" target="_blank">
+                  <UButton color="gray" variant="ghost" icon="i-heroicons-eye" :to="`${config.public.apiBase}/api/download/${doc.id}?token=${auth.token}&inline=true`" target="_blank">
                     View
                   </UButton>
                   

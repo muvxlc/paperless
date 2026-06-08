@@ -84,18 +84,28 @@
             </div>
           </div>
           
-          <div class="shrink-0 self-end sm:self-center">
+          <div class="shrink-0 self-end sm:self-center flex gap-2">
             <!-- Full Download/View -->
-            <UButton 
-              v-if="doc.can_download !== false" 
-              color="primary"
-              variant="soft" 
-              icon="i-heroicons-arrow-down-tray" 
-              :to="`${config.public.apiBase}/api/download/${doc.id}?token=${auth.token}`" 
-              target="_blank"
-            >
-              Download
-            </UButton>
+            <template v-if="doc.can_download !== false">
+              <UButton 
+                color="gray" 
+                variant="ghost" 
+                icon="i-heroicons-eye" 
+                :to="`${config.public.apiBase}/api/download/${doc.id}?token=${auth.token}&inline=true`" 
+                target="_blank"
+              >
+                View
+              </UButton>
+              <UButton 
+                color="primary"
+                variant="soft" 
+                icon="i-heroicons-arrow-down-tray" 
+                :to="`${config.public.apiBase}/api/download/${doc.id}?token=${auth.token}`" 
+                target="_blank"
+              >
+                Download
+              </UButton>
+            </template>
             
             <!-- Restricted View -->
             <UButton 

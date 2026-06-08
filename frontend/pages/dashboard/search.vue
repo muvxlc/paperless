@@ -16,8 +16,8 @@
             <p class="text-sm text-gray-500">Created: {{ doc.created_date }}</p>
           </div>
           <!-- View Button / Download URL logic can go here -->
-          <UButton :to="`${config.public.apiBase}/api/download/${doc.id}`" target="_blank" icon="i-heroicons-eye" color="gray" variant="ghost">
-            View (Raw ID {{ doc.id }})
+          <UButton :to="`${config.public.apiBase}/api/download/${doc.id}?token=${auth.token}&inline=true`" target="_blank" icon="i-heroicons-eye" color="gray" variant="ghost">
+            View
           </UButton>
         </div>
       </UCard>
