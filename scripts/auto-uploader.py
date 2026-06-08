@@ -8,8 +8,8 @@ import hashlib
 import requests
 
 # --- CONFIGURATION ---
-# Base URL of the Elysia backend
-API_BASE_URL = os.environ.get("PAPERLESS_BACKEND_URL", "http://localhost:3001")
+# Base URL of the Paperless Custom Portal
+API_BASE_URL = os.environ.get("PAPERLESS_URL", "https://paperless.bangkhan.com")
 # Credentials of a staff user authorized to upload
 USERNAME = os.environ.get("UPLOAD_USER", "staff1")
 PASSWORD = os.environ.get("UPLOAD_PASSWORD", "password")
