@@ -238,9 +238,10 @@ const targetUsers = computed(() => {
 })
 
 const currentDocs = computed(() => {
-  if (activeTab.value === 0) return pendingDocs.value
-  if (activeTab.value === 1) return requestDocs.value
-  if (activeTab.value === 2) return approvedDocs.value
+  const tabIdx = Number(activeTab.value)
+  if (tabIdx === 0) return pendingDocs.value
+  if (tabIdx === 1) return requestDocs.value
+  if (tabIdx === 2) return approvedDocs.value
   return rejectedDocs.value
 })
 

@@ -506,11 +506,12 @@ watch(searchQuery, () => {
 
 // Watch active tab to refresh correct lists
 watch(activeTab, (newTabIdx) => {
-  if (newTabIdx === 0) {
+  const tabIdx = Number(newTabIdx)
+  if (tabIdx === 0) {
     fetchDocs()
-  } else if (newTabIdx === 1) {
+  } else if (tabIdx === 1) {
     fetchAvailableDocs()
-  } else if (newTabIdx === 2) {
+  } else if (tabIdx === 2) {
     fetchMyRequests()
   }
 })
