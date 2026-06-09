@@ -1598,6 +1598,61 @@ const app = new Elysia()
 
 console.log(`🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`)
 
+// --- Self-Healing Sync: Clean up stale permissions and requests from past cancelled approvals ---
+async function syncStalePermissions() {
+    console.log('[Sync] Starting stale permissions cleanup...');
+    try {
+        const approvedId = await PaperlessService.getOrCreateTag('Approved');
+        
+        // 1. Get all unique document IDs in document_permissions
+        const permissions = await db.select({
+            paperless_id: document_permissions.paperless_id
+        }).from(document_permissions);
+
+        const uniquePermDocIds = Array.from(new Set(permissions.map(p => p.paperless_id)));
+        console.log(`[Sync] Found ${uniquePermDocIds.length} unique documents with permissions in DB.`);
+
+        for (const docId of uniquePermDocIds) {
+            try {
+                // Fetch document from Paperless
+                const doc = await PaperlessService.getDocument(docId);
+                const tags = doc.tags || [];
+
+                // If document does not have the 'Approved' tag, revoke permissions and reset status!
+                if (!tags.includes(approvedId)) {
+                    console.log(`[Sync] Document #${docId} ("${doc.title}") is not approved in Paperless. Revoking stale DB permissions...`);
+                    
+                    // Revoke permissions
+                    await db.delete(document_permissions).where(eq(document_permissions.paperless_id, docId));
+
+                    // Reset approvals
+                    await db.update(approvals).set({ status: 'pending', comment: null }).where(eq(approvals.paperless_doc_id, docId));
+
+                    // Reset user requests status back to pending
+                    await db.update(user_requests).set({ status: 'pending', comment: null }).where(eq(user_requests.paperless_id, docId));
+                }
+            } catch (err: any) {
+                // If document is not found in Paperless (deleted)
+                if (err.message?.includes('not found') || err.message?.includes('404')) {
+                    console.log(`[Sync] Document #${docId} not found in Paperless. Cleaning up DB entries...`);
+                    await db.delete(document_permissions).where(eq(document_permissions.paperless_id, docId));
+                    await db.delete(document_tracking).where(eq(document_tracking.paperless_id, docId));
+                    await db.delete(approvals).where(eq(approvals.paperless_doc_id, docId));
+                    await db.delete(user_requests).where(eq(user_requests.paperless_id, docId));
+                } else {
+                    console.error(`[Sync] Error checking document #${docId}:`, err.message);
+                }
+            }
+        }
+        console.log('[Sync] Stale permissions cleanup complete.');
+    } catch (e) {
+        console.error('[Sync] Stale permissions cleanup failed:', e);
+    }
+}
+
+// Run the sync function on startup in the background
+syncStalePermissions().catch(err => console.error('[Sync] Error on startup sync:', err));
+
 // --- Initialization: Seed Admin User ---
 async function seedAdmin() {
     console.log(`[Init] DB Config Host: ${process.env.DB_HOST || 'localhost'}`);
