@@ -7,6 +7,7 @@
         <p class="text-xs text-gray-400 mt-0.5">Review, approve, or reject uploaded documents.</p>
       </div>
       <div class="flex items-center gap-3 w-full sm:w-auto">
+        <UInput v-model="titleSearch" placeholder="Search title..." icon="i-heroicons-magnifying-glass" class="w-48" />
         <span class="text-xs font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">Filter by Uploader:</span>
         <USelect v-model="selectedUser" :options="userOptions" placeholder="All Users" class="w-48" />
         <UButton 
@@ -105,11 +106,11 @@
                       </UBadge>
                     </div>
                     <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-gray-500 mt-2">
-                      <!-- Uploader (Always display, but styled slightly differently on requests tab) -->
-                      <span class="flex items-center gap-1">
+                      <!-- Uploader (Only display when not in requests tab) -->
+                      <span v-if="item.key !== 'requests'" class="flex items-center gap-1">
                         <UIcon name="i-heroicons-arrow-up-tray" class="w-3.5 h-3.5" />
                         <span>Uploaded by:</span>
-                        <span class="font-semibold text-gray-700 dark:text-gray-300">{{ item.key === 'requests' ? doc.uploader_name : (doc.owner_name || 'System') }}</span>
+                        <span class="font-semibold text-gray-700 dark:text-gray-300">{{ doc.owner_name || 'System' }}</span>
                       </span>
 
                       <!-- Requester (Only display on requests tab, highlighted in orange) -->
@@ -173,13 +174,13 @@
                     Download
                   </UButton>
                   
-                  <!-- Approve: Pending, Requests & Rejected -->
-                  <UButton v-if="item.key === 'requests' || item.key === 'rejected' || (item.key === 'all-charts' && doc.approval_status !== 'approved')" color="green" icon="i-heroicons-check" @click="openApproveModal(doc.id, doc.owner_id)">
+                  <!-- Approve: Pending & Rejected Tabs only (Not All Charts) -->
+                  <UButton v-if="item.key === 'requests' || item.key === 'rejected'" color="green" icon="i-heroicons-check" @click="openApproveModal(doc.id, doc.owner_id)">
                     Approve
                   </UButton>
                   
-                  <!-- Reject: Pending & Requests Only -->
-                  <UButton v-if="item.key === 'requests' || (item.key === 'all-charts' && doc.approval_status === 'pending')" color="red" variant="soft" icon="i-heroicons-x-mark" label="Reject" @click="reject(doc.id, item.key === 'requests' ? doc.request_id : null)" />
+                  <!-- Reject: Requests Tab only (Not All Charts) -->
+                  <UButton v-if="item.key === 'requests'" color="red" variant="soft" icon="i-heroicons-x-mark" label="Reject" @click="reject(doc.id, item.key === 'requests' ? doc.request_id : null)" />
                   
                   <!-- Undo Approval: Approved Only -->
                   <UButton v-if="item.key === 'approved' || (item.key === 'all-charts' && doc.approval_status === 'approved')" color="orange" variant="soft" icon="i-heroicons-arrow-uturn-left" label="Undo" @click="restore(doc.id, true)" />
@@ -187,8 +188,8 @@
                   <!-- Restore: Rejected Only -->
                   <UButton v-if="item.key === 'rejected' || (item.key === 'all-charts' && doc.approval_status === 'rejected')" color="gray" variant="soft" icon="i-heroicons-arrow-path" label="Restore" @click="restore(doc.id)" />
 
-                  <!-- Delete permanently (All Tabs) -->
-                  <UButton color="red" variant="ghost" icon="i-heroicons-trash" @click="deleteDoc(doc.id, doc.title)" />
+                  <!-- Delete permanently (All Tabs - Admin only) -->
+                  <UButton v-if="auth.role === 'admin'" color="red" variant="ghost" icon="i-heroicons-trash" @click="deleteDoc(doc.id, doc.title)" />
                 </div>
               </div>
             </UCard>
@@ -325,6 +326,7 @@ const pending = ref(false)
 const approving = ref(false)
 const activeTab = ref(0)
 const selectedUser = ref(null)
+const titleSearch = ref('')
 
 // Chart Status Management State
 const isStatusModalOpen = ref(false)
@@ -387,8 +389,15 @@ const currentDocs = computed(() => {
 })
 
 const filteredDocs = computed(() => {
-  if (!selectedUser.value) return currentDocs.value
-  return currentDocs.value.filter(doc => doc.owner_name === selectedUser.value)
+  let docs = currentDocs.value
+  if (selectedUser.value) {
+    docs = docs.filter(doc => doc.owner_name === selectedUser.value)
+  }
+  if (titleSearch.value.trim() !== '') {
+    const q = titleSearch.value.toLowerCase()
+    docs = docs.filter(doc => doc.title?.toLowerCase().includes(q))
+  }
+  return docs
 })
 
 function selectAll() {

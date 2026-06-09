@@ -284,8 +284,10 @@ const app = new Elysia()
                 const page = Number(query.page) || 1;
                 const pageSize = Number(query.limit) || Number(query.pageSize) || 12;
 
-                // Build search query exactly like the approve system
-                const searchQuery = search ? `tag:Pending ${search}` : 'tag:Pending';
+                // Build search query to include both Pending and Request tags
+                const searchQuery = search 
+                    ? `(tag:Pending OR tag:Request) AND ${search}` 
+                    : 'tag:Pending OR tag:Request';
                 
                 // Fetch paginated, searched documents with tag 'Pending'
                 const docs = await PaperlessService.getDocumentsAdvanced({
@@ -441,8 +443,8 @@ const app = new Elysia()
                             request_id: req.id, // The ID of the request record itself
                             title: doc.title,
                             owner_id: req.user_id,
-                            owner_name: req.name ? `${req.name} (${req.username})` : req.username,
-                            requester_name: req.name ? `${req.name} (${req.username})` : req.username,
+                            owner_name: req.name || req.username,
+                            requester_name: req.name || req.username,
                             uploader_name: uploaderName,
                             created_date: doc.created, // Original upload date
                             requested_date: req.created_at, // Request date
@@ -679,18 +681,16 @@ const app = new Elysia()
 
                 await PaperlessService.setDocumentTags(docId, currentTags);
 
+                // Clear permissions for this document
+                await db.delete(document_permissions).where(eq(document_permissions.paperless_id, docId));
+
                 // Update DB status for approvals
                 await db.update(approvals).set({ status: 'pending', comment: null }).where(eq(approvals.paperless_doc_id, docId));
 
-                // If user request, restore rejected requests to pending
-                if (isUserRequest) {
-                    await db.update(user_requests)
-                        .set({ status: 'pending', comment: null })
-                        .where(and(
-                            eq(user_requests.paperless_id, docId),
-                            eq(user_requests.status, 'rejected')
-                        ));
-                }
+                // Reset all requests for this document in user_requests back to pending
+                await db.update(user_requests)
+                    .set({ status: 'pending', comment: null })
+                    .where(eq(user_requests.paperless_id, docId));
 
                 // Log Restore
                 await db.insert(audit_logs).values({
@@ -841,13 +841,9 @@ const app = new Elysia()
 
                 return { success: true }
             } catch (e: any) {
-                console.error('[API] Error rejecting user request:', e);
-                set.status = 500; return { error: e.message }
-            }
-        })
-        // Delete document (Approver/Admin only)
+        // Delete document (Admin only)
         .delete('/document/:id', async ({ params, user, set }) => {
-            if (user?.role !== 'approver' && user?.role !== 'admin') {
+            if (user?.role !== 'admin') {
                 set.status = 403; return 'Forbidden'
             }
             const docId = parseInt(params.id)
@@ -892,30 +888,74 @@ const app = new Elysia()
                 set.status = 403; return 'Forbidden'
             }
             try {
-                const docs = await PaperlessService.getDocuments('tag:Rejected');
+                // 1. Fetch from approvals table where status = 'rejected'
+                const dbRejectedApprovals = await db.select({
+                    paperless_id: approvals.paperless_doc_id,
+                    comment: approvals.comment,
+                    updated_at: approvals.created_at
+                }).from(approvals).where(eq(approvals.status, 'rejected'));
 
-                // Enrich with uploader info if possible (similar to /api/pending)
-                // Assuming logic is similar to /pending
-                // Enrich with uploader name from DB or User Map
-                // We need to match paperless owner_id to our users table or just use owner from paperless
-                // For now, let's map using the same logic as Pending/Approved if needed.
-                // Assuming PaperlessService.getDocumentsByTag returns Paperless docs.
+                // 2. Fetch from user_requests table where status = 'rejected'
+                const dbRejectedRequests = await db.select({
+                    paperless_id: user_requests.paperless_id,
+                    comment: user_requests.comment,
+                    updated_at: user_requests.created_at,
+                    user_id: user_requests.user_id
+                }).from(user_requests).where(eq(user_requests.status, 'rejected'));
 
-                // Helper to enrich
-                const enrichedDocs = await Promise.all(docs.results.map(async (doc: any) => {
-                    // Check if we have tracking info
-                    const tracked = await db.select().from(document_tracking).where(eq(document_tracking.paperless_id, doc.id));
-                    let uploaderName = doc.owner_username || 'Unknown'; // Paperless might provide username if mapped
+                // Combined unique document IDs that are rejected
+                const allRejectedDocIds = Array.from(new Set([
+                    ...dbRejectedApprovals.map(a => a.paperless_id),
+                    ...dbRejectedRequests.map(r => r.paperless_id)
+                ]));
 
-                    // If we track uploader in our DB
-                    if (tracked.length > 0 && tracked[0].uploader_id) {
-                        const uploader = await db.select().from(users).where(eq(users.id, tracked[0].uploader_id));
-                        if (uploader.length > 0) uploaderName = uploader[0].username;
+                // Fetch document details from Paperless for these IDs
+                const enrichedDocs = await Promise.all(allRejectedDocIds.map(async (docId) => {
+                    try {
+                        const doc = await PaperlessService.getDocument(docId);
+                        
+                        // Find if it was a user request rejection or general upload rejection
+                        const reqRej = dbRejectedRequests.find(r => r.paperless_id === docId);
+                        const appRej = dbRejectedApprovals.find(a => a.paperless_id === docId);
+                        
+                        const comment = reqRej?.comment || appRej?.comment || 'No comment';
+                        const date = reqRej?.updated_at || appRej?.updated_at || doc.created;
+                        
+                        // Find uploader info
+                        const tracking = await db.select({
+                            uploader_name: users.username,
+                            name: users.name
+                        }).from(document_tracking).where(eq(document_tracking.paperless_id, docId)).limit(1);
+                        
+                        const uploaderName = tracking[0]?.name || tracking[0]?.uploader_name || 'System';
+
+                        // Find requester info if it was a user request
+                        let requesterName = null;
+                        if (reqRej && reqRej.user_id) {
+                            const reqUser = await db.select({
+                                username: users.username,
+                                name: users.name
+                            }).from(users).where(eq(users.id, reqRej.user_id)).limit(1);
+                            if (reqUser.length > 0) {
+                                requesterName = reqUser[0].name ? `${reqUser[0].name} (${reqUser[0].username})` : reqUser[0].username;
+                            }
+                        }
+
+                        return {
+                            ...doc,
+                            owner_name: uploaderName,
+                            requester_name: requesterName,
+                            approval_status: 'rejected',
+                            approval_comment: comment,
+                            rejected_date: date
+                        };
+                    } catch (err) {
+                        return null; // Document deleted
                     }
-                    return { ...doc, owner_name: uploaderName };
                 }));
 
-                return { results: enrichedDocs, count: docs.count }
+                const results = enrichedDocs.filter(d => d !== null);
+                return { results, count: results.length }
             } catch (e: any) {
                 set.status = 500; return { error: e.message }
             }
@@ -1628,6 +1668,15 @@ setInterval(async () => {
                         await PaperlessService.setDocumentTags(doc.paperless_id, currentTags);
                         console.log(`[Scheduler] Reverted Doc ${doc.paperless_id} to ${targetTagName}.`);
                     }
+
+                    // 1. Clear permissions for the expired document
+                    await db.delete(document_permissions).where(eq(document_permissions.paperless_id, doc.paperless_id));
+
+                    // 2. Reset approvals status back to pending
+                    await db.update(approvals).set({ status: 'pending', comment: null }).where(eq(approvals.paperless_doc_id, doc.paperless_id));
+
+                    // 3. Reset user requests status back to pending
+                    await db.update(user_requests).set({ status: 'pending', comment: null }).where(eq(user_requests.paperless_id, doc.paperless_id));
 
                     // Clear expires_at
                     await db.update(document_tracking)
