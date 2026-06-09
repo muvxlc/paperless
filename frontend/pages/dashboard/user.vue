@@ -67,7 +67,12 @@
                       <UIcon name="i-heroicons-document-text" class="text-2xl text-orange-500" />
                     </div>
                     <div class="min-w-0 flex-1">
-                      <h4 class="font-bold text-gray-800 dark:text-white truncate">{{ doc.title }}</h4>
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <h4 class="font-bold text-gray-800 dark:text-white truncate">{{ doc.title }}</h4>
+                        <UBadge v-if="doc.chart_status" :color="doc.chart_status.color || 'gray'" variant="solid" size="xs" class="capitalize shrink-0">
+                          {{ doc.chart_status.name }}
+                        </UBadge>
+                      </div>
                       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 mt-1.5">
                         <span class="flex items-center gap-1">
                           <UIcon name="i-heroicons-calendar" class="w-3.5 h-3.5" />
@@ -193,6 +198,11 @@
                     <h3 class="font-bold text-gray-800 dark:text-white line-clamp-2 min-h-[40px] text-sm" :title="doc.title">
                       {{ doc.title }}
                     </h3>
+                    <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                      <UBadge v-if="doc.chart_status" :color="doc.chart_status.color || 'gray'" variant="solid" size="xs" class="capitalize shrink-0">
+                        {{ doc.chart_status.name }}
+                      </UBadge>
+                    </div>
                     <p class="text-[11px] text-gray-400 mt-2 flex items-center gap-1">
                       <UIcon name="i-heroicons-calendar" class="w-3.5 h-3.5" />
                       Created: {{ formatTimestamp(doc.created) }}
@@ -302,7 +312,12 @@
                       />
                     </div>
                     <div class="min-w-0 flex-1">
-                      <h4 class="font-bold text-gray-800 dark:text-white truncate">{{ doc.title }}</h4>
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <h4 class="font-bold text-gray-800 dark:text-white truncate">{{ doc.title }}</h4>
+                        <UBadge v-if="doc.chart_status" :color="doc.chart_status.color || 'gray'" variant="solid" size="xs" class="capitalize shrink-0">
+                          {{ doc.chart_status.name }}
+                        </UBadge>
+                      </div>
                       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 mt-1.5">
                         <span class="flex items-center gap-1">
                           <UIcon name="i-heroicons-calendar" class="w-3.5 h-3.5" />

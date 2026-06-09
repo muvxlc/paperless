@@ -174,13 +174,13 @@
                     Download
                   </UButton>
                   
-                  <!-- Approve: Pending & Rejected Tabs only (Not All Charts) -->
-                  <UButton v-if="item.key === 'requests' || item.key === 'rejected'" color="green" icon="i-heroicons-check" @click="openApproveModal(doc.id, doc.owner_id)">
+                  <!-- Approve: Requests Tab, or Pending state in All Charts -->
+                  <UButton v-if="item.key === 'requests' || (item.key === 'all-charts' && doc.approval_status === 'pending')" color="green" icon="i-heroicons-check" @click="openApproveModal(doc.id, doc.owner_id)">
                     Approve
                   </UButton>
                   
-                  <!-- Reject: Requests Tab only (Not All Charts) -->
-                  <UButton v-if="item.key === 'requests'" color="red" variant="soft" icon="i-heroicons-x-mark" label="Reject" @click="reject(doc.id, item.key === 'requests' ? doc.request_id : null)" />
+                  <!-- Reject: Requests Tab, or Pending state in All Charts -->
+                  <UButton v-if="item.key === 'requests' || (item.key === 'all-charts' && doc.approval_status === 'pending')" color="red" variant="soft" icon="i-heroicons-x-mark" label="Reject" @click="reject(doc.id, item.key === 'requests' ? doc.request_id : null)" />
                   
                   <!-- Undo Approval: Approved Only -->
                   <UButton v-if="item.key === 'approved' || (item.key === 'all-charts' && doc.approval_status === 'approved')" color="orange" variant="soft" icon="i-heroicons-arrow-uturn-left" label="Undo" @click="restore(doc.id, true)" />
@@ -370,7 +370,7 @@ const tabs = [
 const userOptions = computed(() => {
   const options = [{ label: 'All Users', value: null }]
   availableUsers.value.forEach(u => {
-    options.push({ label: u.username, value: u.username })
+    options.push({ label: u.name ? `${u.name} (${u.username})` : u.username, value: u.username })
   })
   return options
 })
