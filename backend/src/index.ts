@@ -1290,10 +1290,13 @@ const app = new Elysia()
                 const contentType = response.headers.get('content-type');
                 if (contentType) set.headers['content-type'] = contentType;
 
-                if (forceInline) {
+                const isInline = query.inline === 'true' || query.inline === true;
+                if (isInline || forceInline) {
                     set.headers['content-disposition'] = 'inline';
-                    // Extra security headers to block downloads in PDF viewer plugins
-                    set.headers['cache-control'] = 'no-store, no-cache, must-revalidate, max-age=0';
+                    // Extra security headers to block downloads in PDF viewer plugins (only for restricted view-only)
+                    if (forceInline) {
+                        set.headers['cache-control'] = 'no-store, no-cache, must-revalidate, max-age=0';
+                    }
                 } else {
                     const contentDisp = response.headers.get('content-disposition');
                     if (contentDisp) set.headers['content-disposition'] = contentDisp;
