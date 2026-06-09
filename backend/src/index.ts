@@ -841,6 +841,10 @@ const app = new Elysia()
 
                 return { success: true }
             } catch (e: any) {
+                console.error('[API] Error rejecting user request:', e);
+                set.status = 500; return { error: e.message }
+            }
+        })
         // Delete document (Admin only)
         .delete('/document/:id', async ({ params, user, set }) => {
             if (user?.role !== 'admin') {
