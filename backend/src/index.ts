@@ -409,7 +409,18 @@ const app = new Elysia()
                             isNotNull(users.discord_webhook)
                         ));
                     
-                    const requesterName = user.name ? `${user.name} (${user.username})` : user.username;
+                    const requester = await db.select({
+                        name: users.name,
+                        username: users.username
+                    })
+                    .from(users)
+                    .where(eq(users.id, user.id))
+                    .limit(1);
+
+                    const requesterName = requester[0]?.name 
+                        ? `${requester[0].name} (${requester[0].username})` 
+                        : (requester[0]?.username || user.username);
+
                     const message = `🔔 **New Document Request**\nUser **${requesterName}** has requested access to document: **"${doc.title}"**`;
                     
                     for (const nu of notifyUsers) {
@@ -783,10 +794,10 @@ const app = new Elysia()
                             isNotNull(users.discord_webhook)
                         ));
 
-                        const message = `✅ **Document Approved**\nYour request for access to document: **"${doc.title}"** has been approved. You can now view it in your dashboard.`;
-
                         for (const au of approvedUserWebhooks) {
                             if (au.discord_webhook) {
+                                const greeting = au.name ? `Hello **${au.name} (${au.username})**` : `Hello **${au.username}**`;
+                                const message = `✅ **Document Approved**\n${greeting}, your request for access to document: **"${doc.title}"** has been approved. You can now view it in your dashboard.`;
                                 sendDiscordNotification(au.discord_webhook, message);
                             }
                         }
@@ -983,6 +994,8 @@ const app = new Elysia()
                 // Notify requester via Discord webhook
                 try {
                     const requester = await db.select({
+                        username: users.username,
+                        name: users.name,
                         discord_webhook: users.discord_webhook
                     })
                     .from(users)
@@ -990,9 +1003,11 @@ const app = new Elysia()
                     .limit(1);
 
                     if (requester.length > 0 && requester[0].discord_webhook) {
+                        const au = requester[0];
+                        const greeting = au.name ? `Hello **${au.name} (${au.username})**` : `Hello **${au.username}**`;
                         const reasonText = comment ? `Reason: **"${comment}"**` : 'No reason provided.';
-                        const message = `❌ **Request Rejected**\nYour request for access to document: **"${reqDocTitle}"** has been rejected. ${reasonText}`;
-                        sendDiscordNotification(requester[0].discord_webhook, message);
+                        const message = `❌ **Request Rejected**\n${greeting}, your request for access to document: **"${reqDocTitle}"** has been rejected. ${reasonText}`;
+                        sendDiscordNotification(au.discord_webhook, message);
                     }
                 } catch (err) {
                     console.error('[API] Error sending reject Discord notification:', err);
