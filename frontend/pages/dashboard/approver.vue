@@ -232,6 +232,9 @@
             <UButton color="green" :loading="approving" @click="confirmApprove">Confirm Approval</UButton>
           </div>
         </template>
+      </UCard>
+    </UModal>
+
     <!-- Chart Status Management Modal -->
     <UModal v-model="isStatusModalOpen">
       <UCard :ui="{ ring: '', divide: 'divide-y divide-gray-100 dark:divide-gray-800' }">
