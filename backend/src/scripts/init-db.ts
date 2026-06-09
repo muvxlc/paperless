@@ -28,17 +28,27 @@ async function initDB() {
         `);
         console.log(" - Checked/Created table: users");
 
-        // Ensure name, display_name, thaid_pid, and authentik_sub columns exist in users table
-        try {
-            await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255) NULL");
-            await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(255) NULL");
-            await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS thaid_pid VARCHAR(255) NULL UNIQUE");
-            await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS authentik_sub VARCHAR(255) NULL UNIQUE");
-            await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS discord_webhook VARCHAR(512) NULL");
-            console.log(" - Checked/Added OIDC, name, and webhook columns to users table");
-        } catch (alterError) {
-            console.warn(" - Warning while checking/altering users table:", alterError);
-        }
+        // Ensure name, display_name, thaid_pid, authentik_sub, and discord_webhook columns exist in users table
+        const addColumnSafely = async (columnName: string, sqlDefinition: string) => {
+            try {
+                const [cols]: any = await connection.execute(`SHOW COLUMNS FROM users LIKE '${columnName}'`);
+                if (cols.length === 0) {
+                    console.log(`[Init] Adding column '${columnName}' to users table...`);
+                    await connection.execute(`ALTER TABLE users ADD COLUMN ${columnName} ${sqlDefinition}`);
+                    console.log(`[Init] Column '${columnName}' added successfully.`);
+                } else {
+                    console.log(`[Init] Column '${columnName}' already exists.`);
+                }
+            } catch (err) {
+                console.error(`[Init] Error checking/adding column '${columnName}':`, err);
+            }
+        };
+
+        await addColumnSafely("name", "VARCHAR(255) NULL");
+        await addColumnSafely("display_name", "VARCHAR(255) NULL");
+        await addColumnSafely("thaid_pid", "VARCHAR(255) NULL UNIQUE");
+        await addColumnSafely("authentik_sub", "VARCHAR(255) NULL UNIQUE");
+        await addColumnSafely("discord_webhook", "VARCHAR(512) NULL");
 
         // 2. Approvals Table
         await connection.execute(`
