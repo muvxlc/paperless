@@ -100,7 +100,7 @@
                         {{ doc.chart_status.name }}
                       </UBadge>
                       <!-- Approval Status Badge (Only for All Charts) -->
-                      <UBadge v-slot:default v-if="item.key === 'all-charts'" :color="doc.approval_status === 'approved' ? 'green' : (doc.approval_status === 'rejected' ? 'red' : 'amber')" variant="subtle" size="xs" class="capitalize shrink-0">
+                      <UBadge v-if="item.key === 'all-charts'" :color="doc.approval_status === 'approved' ? 'green' : (doc.approval_status === 'rejected' ? 'red' : 'amber')" variant="subtle" size="xs" class="capitalize shrink-0">
                         {{ doc.approval_status }}
                       </UBadge>
                     </div>
@@ -115,12 +115,12 @@
                         <UIcon name="i-heroicons-calendar" class="w-3.5 h-3.5" />
                         Uploaded: {{ formatTimestamp(doc.created_date || doc.created) }}
                       </span>
-                      <span v-slot:default v-if="doc.expires_at" class="flex items-center gap-1 text-red-500">
+                      <span v-if="doc.expires_at" class="flex items-center gap-1 text-red-500">
                         <span>&bull;</span>
                         <UIcon name="i-heroicons-clock" class="w-3.5 h-3.5" />
                         Expires: {{ formatTimestamp(doc.expires_at) }}
                       </span>
-                      <span v-slot:default v-if="doc.comment || doc.approval_comment" class="flex items-center gap-1 text-red-500 font-semibold">
+                      <span v-if="doc.comment || doc.approval_comment" class="flex items-center gap-1 text-red-500 font-semibold">
                         <span>&bull;</span>
                         <UIcon name="i-heroicons-chat-bubble-left-right" class="w-3.5 h-3.5" />
                         Reason: {{ doc.comment || doc.approval_comment }}
@@ -232,6 +232,9 @@
             <UButton color="green" :loading="approving" @click="confirmApprove">Confirm Approval</UButton>
           </div>
         </template>
+      </UCard>
+    </UModal>
+
     <!-- Chart Status Management Modal -->
     <UModal v-model="isStatusModalOpen">
       <UCard :ui="{ ring: '', divide: 'divide-y divide-gray-100 dark:divide-gray-800' }">

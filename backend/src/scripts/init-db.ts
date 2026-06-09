@@ -34,7 +34,8 @@ async function initDB() {
             await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(255) NULL");
             await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS thaid_pid VARCHAR(255) NULL UNIQUE");
             await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS authentik_sub VARCHAR(255) NULL UNIQUE");
-            console.log(" - Checked/Added OIDC and name columns to users table");
+            await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS discord_webhook VARCHAR(512) NULL");
+            console.log(" - Checked/Added OIDC, name, and webhook columns to users table");
         } catch (alterError) {
             console.warn(" - Warning while checking/altering users table:", alterError);
         }
@@ -105,6 +106,29 @@ async function initDB() {
             );
         `);
         console.log(" - Checked/Created table: user_requests");
+
+        // 7. Chart Statuses
+        await connection.execute(`
+            CREATE TABLE IF NOT EXISTS chart_statuses (
+                id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL UNIQUE,
+                color VARCHAR(50) NOT NULL DEFAULT 'gray',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        console.log(" - Checked/Created table: chart_statuses");
+
+        // 8. Document Chart Status
+        await connection.execute(`
+            CREATE TABLE IF NOT EXISTS document_chart_status (
+                id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                paperless_id INT NOT NULL UNIQUE,
+                status_id BIGINT UNSIGNED,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (status_id) REFERENCES chart_statuses(id) ON DELETE CASCADE
+            );
+        `);
+        console.log(" - Checked/Created table: document_chart_status");
 
         // --- Seed Admin ---
         console.log("[Init] Checking for admin user...");
