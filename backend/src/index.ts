@@ -428,27 +428,33 @@ const app = new Elysia()
                     eq(user_requests.status, 'pending')
                 ));
 
-                // Get document to check tags
-                const doc = await PaperlessService.getDocument(docId);
-                const pendingId = await PaperlessService.getOrCreateTag('Pending');
-                const requestId = await PaperlessService.getOrCreateTag('Request');
+                // Get document to check tags and do tag cleanup
+                let docTitle = 'Untitled';
+                try {
+                    const doc = await PaperlessService.getDocument(docId);
+                    docTitle = doc?.title || 'Untitled';
+                    const pendingId = await PaperlessService.getOrCreateTag('Pending');
+                    const requestId = await PaperlessService.getOrCreateTag('Request');
 
-                // Check if there are other pending requests for the same document
-                const otherPending = await db.select()
-                    .from(user_requests)
-                    .where(and(
-                        eq(user_requests.paperless_id, docId),
-                        eq(user_requests.status, 'pending')
-                    ));
+                    // Check if there are other pending requests for the same document
+                    const otherPending = await db.select()
+                        .from(user_requests)
+                        .where(and(
+                            eq(user_requests.paperless_id, docId),
+                            eq(user_requests.status, 'pending')
+                        ));
 
-                // If no other pending requests for this document, remove the Request tag and add Pending tag
-                let tags = doc.tags || [];
-                if (otherPending.length === 0) {
-                    tags = tags.filter((t: number) => t !== requestId);
-                    if (!tags.includes(pendingId)) {
-                        tags.push(pendingId);
+                    // If no other pending requests for this document, remove the Request tag and add Pending tag
+                    let tags = doc.tags || [];
+                    if (otherPending.length === 0) {
+                        tags = tags.filter((t: number) => t !== requestId);
+                        if (!tags.includes(pendingId)) {
+                            tags.push(pendingId);
+                        }
+                        await PaperlessService.setDocumentTags(docId, tags);
                     }
-                    await PaperlessService.setDocumentTags(docId, tags);
+                } catch (docErr) {
+                    console.warn(`[API] Document #${docId} not found in Paperless on cancel-request, skipping tag cleanup.`);
                 }
 
                 // Log audit log
@@ -456,7 +462,7 @@ const app = new Elysia()
                     user_id: user.id,
                     action: 'CANCEL_REQUEST',
                     target_id: String(docId),
-                    details: `Cancelled access request to document: "${doc.title}"`
+                    details: `Cancelled access request to document: "${docTitle}"`
                 });
 
                 return { success: true }
@@ -860,24 +866,33 @@ const app = new Elysia()
                 // If no more pending requests for this document, remove the Request tag from Paperless-ngx
                 if (otherPending.length === 0) {
                     const docId = requestObj.paperless_id;
-                    const doc = await PaperlessService.getDocument(docId);
-                    const pendingId = await PaperlessService.getOrCreateTag('Pending');
-                    const approvedId = await PaperlessService.getOrCreateTag('Approved');
-                    const rejectedId = await PaperlessService.getOrCreateTag('Rejected');
-                    const requestIdTag = await PaperlessService.getOrCreateTag('Request');
+                    try {
+                        const doc = await PaperlessService.getDocument(docId);
+                        const pendingId = await PaperlessService.getOrCreateTag('Pending');
+                        const approvedId = await PaperlessService.getOrCreateTag('Approved');
+                        const rejectedId = await PaperlessService.getOrCreateTag('Rejected');
+                        const requestIdTag = await PaperlessService.getOrCreateTag('Request');
 
-                    let currentTags = doc.tags || [];
-                    currentTags = currentTags.filter((t: number) => t !== requestIdTag && t !== approvedId && t !== pendingId);
-                    
-                    if (!currentTags.includes(pendingId)) {
-                        currentTags.push(pendingId); // Ensure it keeps/re-acquires the 'Pending' tag if not already there
+                        let currentTags = doc.tags || [];
+                        currentTags = currentTags.filter((t: number) => t !== requestIdTag && t !== approvedId && t !== pendingId);
+                        
+                        if (!currentTags.includes(pendingId)) {
+                            currentTags.push(pendingId); // Ensure it keeps/re-acquires the 'Pending' tag if not already there
+                        }
+                        await PaperlessService.setDocumentTags(docId, currentTags);
+                    } catch (docErr) {
+                        console.warn(`[API] Document #${docId} not found in Paperless on reject-request, skipping tag cleanup.`);
                     }
-                    await PaperlessService.setDocumentTags(docId, currentTags);
                 }
 
                 // Fetch document details for the log
-                const reqDoc = await PaperlessService.getDocument(requestObj.paperless_id);
-                const reqDocTitle = reqDoc?.title || 'Untitled';
+                let reqDocTitle = 'Untitled';
+                try {
+                    const reqDoc = await PaperlessService.getDocument(requestObj.paperless_id);
+                    reqDocTitle = reqDoc?.title || 'Untitled';
+                } catch (docErr) {
+                    console.warn(`[API] Document #${requestObj.paperless_id} not found in Paperless on reject-request, using fallback title.`);
+                }
 
                 // Log Reject Event
                 await db.insert(audit_logs).values({
@@ -1706,15 +1721,23 @@ async function syncStalePermissions() {
 
         const approvedId = await PaperlessService.getOrCreateTag('Approved');
         
-        // 1. Get all unique document IDs in document_permissions
-        const permissions = await db.select({
-            paperless_id: document_permissions.paperless_id
-        }).from(document_permissions);
+        // 1. Get all unique document IDs across all DB tables
+        const permIds = await db.select({ id: document_permissions.paperless_id }).from(document_permissions);
+        const trackIds = await db.select({ id: document_tracking.paperless_id }).from(document_tracking);
+        const appIds = await db.select({ id: approvals.paperless_doc_id }).from(approvals);
+        const reqIds = await db.select({ id: user_requests.paperless_id }).from(user_requests);
+        const chartIds = await db.select({ id: document_chart_status.paperless_id }).from(document_chart_status);
 
-        const uniquePermDocIds = Array.from(new Set(permissions.map(p => p.paperless_id)));
-        console.log(`[Sync] Found ${uniquePermDocIds.length} unique documents with permissions in DB.`);
+        const allDbDocIds = Array.from(new Set([
+            ...permIds.map(p => p.id),
+            ...trackIds.map(t => t.id),
+            ...appIds.map(a => a.id),
+            ...reqIds.map(r => r.id),
+            ...chartIds.map(c => c.id)
+        ]));
+        console.log(`[Sync] Found ${allDbDocIds.length} unique document IDs across all DB tables.`);
 
-        for (const docId of uniquePermDocIds) {
+        for (const docId of allDbDocIds) {
             try {
                 // Fetch document from Paperless
                 const doc = await PaperlessService.getDocument(docId);
@@ -1722,10 +1745,12 @@ async function syncStalePermissions() {
 
                 // If document does not have the 'Approved' tag, revoke permissions and reset status!
                 if (!tags.includes(approvedId)) {
-                    console.log(`[Sync] Document #${docId} ("${doc.title}") is not approved in Paperless. Revoking stale DB permissions...`);
-                    
-                    // Revoke permissions
-                    await db.delete(document_permissions).where(eq(document_permissions.paperless_id, docId));
+                    // Only revoke permissions if they exist
+                    const existingPerms = await db.select().from(document_permissions).where(eq(document_permissions.paperless_id, docId));
+                    if (existingPerms.length > 0) {
+                        console.log(`[Sync] Document #${docId} ("${doc.title}") is not approved in Paperless. Revoking stale DB permissions...`);
+                        await db.delete(document_permissions).where(eq(document_permissions.paperless_id, docId));
+                    }
 
                     // Reset approvals
                     await db.update(approvals).set({ status: 'pending', comment: null }).where(eq(approvals.paperless_doc_id, docId));
@@ -1736,17 +1761,18 @@ async function syncStalePermissions() {
             } catch (err: any) {
                 // If document is not found in Paperless (deleted)
                 if (err.message?.includes('not found') || err.message?.includes('404')) {
-                    console.log(`[Sync] Document #${docId} not found in Paperless. Cleaning up DB entries...`);
+                    console.log(`[Sync] Document #${docId} not found in Paperless. Cleaning up all DB entries...`);
                     await db.delete(document_permissions).where(eq(document_permissions.paperless_id, docId));
                     await db.delete(document_tracking).where(eq(document_tracking.paperless_id, docId));
                     await db.delete(approvals).where(eq(approvals.paperless_doc_id, docId));
                     await db.delete(user_requests).where(eq(user_requests.paperless_id, docId));
+                    await db.delete(document_chart_status).where(eq(document_chart_status.paperless_id, docId));
                 } else {
                     console.error(`[Sync] Error checking document #${docId}:`, err.message);
                 }
             }
         }
-        console.log('[Sync] Stale permissions cleanup complete.');
+        console.log('[Sync] Stale permissions and deleted document cleanup complete.');
     } catch (e) {
         console.error('[Sync] Stale permissions cleanup failed:', e);
     }
