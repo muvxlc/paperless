@@ -79,7 +79,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             console.log("[OIDC] Initiating DOPA/ThaID login redirect...");
             const authUrl = getThaIDAuthUrl();
             console.log("[OIDC] DOPA/ThaID Auth URL generated:", authUrl);
-            set.redirect = authUrl;
+            return Response.redirect(authUrl, 302);
         } catch (e: any) {
             console.error("[OIDC Error] Failed to generate DOPA/ThaID Auth URL:", e);
             set.status = 500;
@@ -153,7 +153,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             // Redirect back to frontend login page with token info
             const frontendUrl = getFrontendUrl(headers as any);
             const redirectUrl = `${frontendUrl}/login?token=${token}&role=${userRecord.role}&username=${encodeURIComponent(userRecord.display_name || userRecord.username)}`;
-            set.redirect = redirectUrl;
+            return Response.redirect(redirectUrl, 302);
         } catch (e: any) {
             console.error("[OIDC Callback Error] DOPA:", e);
             set.status = 500;
@@ -165,7 +165,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             console.log("[OIDC] Initiating Authentik login redirect...");
             const authUrl = getAuthentikAuthUrl();
             console.log("[OIDC] Authentik Auth URL generated:", authUrl);
-            set.redirect = authUrl;
+            return Response.redirect(authUrl, 302);
         } catch (e: any) {
             console.error("[OIDC Error] Failed to generate Authentik Auth URL:", e);
             set.status = 500;
@@ -252,7 +252,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             // Redirect back to frontend login page with token info
             const frontendUrl = getFrontendUrl(headers as any);
             const redirectUrl = `${frontendUrl}/login?token=${token}&role=${userRecord.role}&username=${encodeURIComponent(userRecord.display_name || userRecord.username)}`;
-            set.redirect = redirectUrl;
+            return Response.redirect(redirectUrl, 302);
         } catch (e: any) {
             console.error("[OIDC Callback Error] Authentik:", e);
             set.status = 500;
