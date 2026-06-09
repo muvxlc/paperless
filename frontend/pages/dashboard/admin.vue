@@ -181,6 +181,7 @@ function formatTimestamp(ts) {
 }
 
 async function fetchDashboardStats() {
+  if (!auth.isAuthenticated) return
   loading.value = true
   try {
     const [pendingRes, approvedRes, rejectedRes, usersRes, logsRes] = await Promise.all([
@@ -195,7 +196,7 @@ async function fetchDashboardStats() {
     approvedCount.value = approvedRes?.results?.length || approvedRes?.count || 0
     rejectedCount.value = rejectedRes?.results?.length || rejectedRes?.count || 0
     usersCount.value = usersRes?.length || 0
-    recentLogs.value = logsRes?.results || []
+    recentLogs.value = logsRes?.data || []
   } catch (err) {
     console.error('Fetch stats error:', err)
   } finally {
