@@ -199,7 +199,7 @@ const app = new Elysia()
                 const enrichedResults = await Promise.all(docs.results.map(async (doc: any) => {
                     const tracking = await db.select({
                         uploader_name: users.username,
-                        display_name: users.display_name
+                        name: users.name
                     })
                         .from(document_tracking)
                         .leftJoin(users, eq(document_tracking.uploader_id, users.id))
@@ -208,7 +208,7 @@ const app = new Elysia()
 
                     return {
                         ...doc,
-                        owner_name: tracking[0]?.display_name || tracking[0]?.uploader_name || 'System'
+                        owner_name: tracking[0]?.name || tracking[0]?.uploader_name || 'System'
                     }
                 }));
 
@@ -334,7 +334,7 @@ const app = new Elysia()
                     paperless_id: user_requests.paperless_id,
                     user_id: user_requests.user_id,
                     username: users.username,
-                    display_name: users.display_name,
+                    name: users.name,
                     created_at: user_requests.created_at
                 })
                     .from(user_requests)
@@ -351,7 +351,7 @@ const app = new Elysia()
                             request_id: req.id, // The ID of the request record itself
                             title: doc.title,
                             owner_id: req.user_id,
-                            owner_name: req.display_name || req.username,
+                            owner_name: req.name || req.username,
                             created_date: req.created_at,
                             created: req.created_at,
                             tags: doc.tags || []
@@ -1167,7 +1167,7 @@ const app = new Elysia()
                     try {
                         const tracking = await db.select({
                             uploader_name: users.username,
-                            display_name: users.display_name,
+                            name: users.name,
                             expires_at: document_tracking.expires_at
                         })
                             .from(document_tracking)
@@ -1191,7 +1191,7 @@ const app = new Elysia()
 
                         return {
                             ...doc,
-                            owner_name: tracking[0]?.display_name || tracking[0]?.uploader_name || 'System',
+                            owner_name: tracking[0]?.name || tracking[0]?.uploader_name || 'System',
                             expires_at: tracking[0]?.expires_at,
                             can_download: canDownload
                         }

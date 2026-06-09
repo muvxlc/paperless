@@ -66,7 +66,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
                 role: user.role,
             });
 
-            return { token, role: user.role, username: user.display_name || user.username };
+            return { token, role: user.role, username: user.name || user.username };
         },
         {
             body: t.Object({
@@ -135,9 +135,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             
             if (existingByPid) {
                 userRecord = existingByPid;
-                // Update display name if changed
-                if (userRecord.display_name !== name) {
-                    await db.update(users).set({ display_name: name }).where(eq(users.id, userRecord.id)).execute();
+                // Update name if changed
+                if (userRecord.name !== name) {
+                    await db.update(users).set({ name }).where(eq(users.id, userRecord.id)).execute();
                 }
             } else {
                 // Fallback: check if username = pid exists
@@ -145,7 +145,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
                 if (existingByUsername) {
                     userRecord = existingByUsername;
                     // Link with thaid_pid
-                    await db.update(users).set({ thaid_pid: pid, display_name: name }).where(eq(users.id, userRecord.id)).execute();
+                    await db.update(users).set({ thaid_pid: pid, name }).where(eq(users.id, userRecord.id)).execute();
                 } else {
                     // Create new user
                     const randomPassword = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -155,7 +155,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
                         username: pid,
                         password: hashedPassword,
                         role: "user", // Default role for DOPA users
-                        display_name: name,
+                        name,
                         thaid_pid: pid
                     });
                     
@@ -174,7 +174,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
 
             // Redirect back to frontend login page with token info
             const frontendUrl = getFrontendUrl(headers as any);
-            const redirectUrl = `${frontendUrl}/login?token=${token}&role=${userRecord.role}&username=${encodeURIComponent(userRecord.display_name || userRecord.username)}`;
+            const redirectUrl = `${frontendUrl}/login?token=${token}&role=${userRecord.role}&username=${encodeURIComponent(userRecord.name || userRecord.username)}`;
             return Response.redirect(redirectUrl, 302);
         } catch (e: any) {
             console.error("[OIDC Callback Error] DOPA:", e);
@@ -255,9 +255,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             
             if (existingBySub) {
                 userRecord = existingBySub;
-                // Update display name/role if changed
-                if (userRecord.display_name !== name || userRecord.role !== mappedRole) {
-                    await db.update(users).set({ display_name: name, role: mappedRole }).where(eq(users.id, userRecord.id)).execute();
+                // Update name/role if changed
+                if (userRecord.name !== name || userRecord.role !== mappedRole) {
+                    await db.update(users).set({ name, role: mappedRole }).where(eq(users.id, userRecord.id)).execute();
                 }
             } else {
                 // Fallback: check if username = preferredUsername exists
@@ -265,7 +265,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
                 if (existingByUsername) {
                     userRecord = existingByUsername;
                     // Link with authentik_sub
-                    await db.update(users).set({ authentik_sub: sub, display_name: name, role: mappedRole }).where(eq(users.id, userRecord.id)).execute();
+                    await db.update(users).set({ authentik_sub: sub, name, role: mappedRole }).where(eq(users.id, userRecord.id)).execute();
                 } else {
                     // Create new user
                     const randomPassword = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -275,7 +275,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
                         username: preferredUsername,
                         password: hashedPassword,
                         role: mappedRole,
-                        display_name: name,
+                        name,
                         authentik_sub: sub
                     });
                     
@@ -294,7 +294,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
 
             // Redirect back to frontend login page with token info
             const frontendUrl = getFrontendUrl(headers as any);
-            const redirectUrl = `${frontendUrl}/login?token=${token}&role=${userRecord.role}&username=${encodeURIComponent(userRecord.display_name || userRecord.username)}`;
+            const redirectUrl = `${frontendUrl}/login?token=${token}&role=${userRecord.role}&username=${encodeURIComponent(userRecord.name || userRecord.username)}`;
             return Response.redirect(redirectUrl, 302);
         } catch (e: any) {
             console.error("[OIDC Callback Error] Authentik:", e);
