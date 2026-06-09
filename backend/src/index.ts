@@ -303,11 +303,37 @@ const app = new Elysia()
                 
                 const requestedMap = new Map(userRequestsList.map(r => [r.paperless_id, r.status]));
 
+                // Fetch chart statuses in bulk
+                const docIds = docs.results.map((d: any) => d.id);
+                const chartStatusMap = new Map<number, { id: number, name: string, color: string }>();
+                if (docIds.length > 0) {
+                    const statuses = await db.select({
+                        paperless_id: document_chart_status.paperless_id,
+                        status_id: document_chart_status.status_id,
+                        status_name: chart_statuses.name,
+                        status_color: chart_statuses.color
+                    })
+                    .from(document_chart_status)
+                    .leftJoin(chart_statuses, eq(document_chart_status.status_id, chart_statuses.id))
+                    .where(inArray(document_chart_status.paperless_id, docIds));
+
+                    for (const s of statuses) {
+                        if (s.status_id) {
+                            chartStatusMap.set(s.paperless_id, {
+                                id: s.status_id,
+                                name: s.status_name || '',
+                                color: s.status_color || 'gray'
+                            });
+                        }
+                    }
+                }
+
                 // Enrich results with request status for this user
                 const enrichedResults = docs.results.map((doc: any) => {
                     return {
                         ...doc,
-                        request_status: requestedMap.get(doc.id) || null // 'pending', 'approved', 'rejected' or null
+                        request_status: requestedMap.get(doc.id) || null, // 'pending', 'approved', 'rejected' or null
+                        chart_status: chartStatusMap.get(doc.id) || null
                     }
                 });
 
@@ -491,6 +517,31 @@ const app = new Elysia()
                     .where(eq(user_requests.status, 'pending'))
                     .orderBy(desc(user_requests.created_at));
 
+                // Fetch chart statuses in bulk
+                const docIds = pendingRequests.map(r => r.paperless_id);
+                const chartStatusMap = new Map<number, { id: number, name: string, color: string }>();
+                if (docIds.length > 0) {
+                    const statuses = await db.select({
+                        paperless_id: document_chart_status.paperless_id,
+                        status_id: document_chart_status.status_id,
+                        status_name: chart_statuses.name,
+                        status_color: chart_statuses.color
+                    })
+                    .from(document_chart_status)
+                    .leftJoin(chart_statuses, eq(document_chart_status.status_id, chart_statuses.id))
+                    .where(inArray(document_chart_status.paperless_id, docIds));
+
+                    for (const s of statuses) {
+                        if (s.status_id) {
+                            chartStatusMap.set(s.paperless_id, {
+                                id: s.status_id,
+                                name: s.status_name || '',
+                                color: s.status_color || 'gray'
+                            });
+                        }
+                    }
+                }
+
                 // Enrich with Paperless document details
                 const enrichedResults = await Promise.all(pendingRequests.map(async (req: any) => {
                     try {
@@ -521,7 +572,8 @@ const app = new Elysia()
                             created_date: doc.created, // Original upload date
                             requested_date: req.created_at, // Request date
                             created: req.created_at,
-                            tags: doc.tags || []
+                            tags: doc.tags || [],
+                            chart_status: chartStatusMap.get(doc.id) || null
                         }
                     } catch (err) {
                         return null; // Document might have been deleted in Paperless
@@ -554,6 +606,31 @@ const app = new Elysia()
                     .where(eq(user_requests.user_id, user.id))
                     .orderBy(desc(user_requests.created_at));
 
+                // Fetch chart statuses in bulk
+                const docIds = myRequests.map(r => r.paperless_id);
+                const chartStatusMap = new Map<number, { id: number, name: string, color: string }>();
+                if (docIds.length > 0) {
+                    const statuses = await db.select({
+                        paperless_id: document_chart_status.paperless_id,
+                        status_id: document_chart_status.status_id,
+                        status_name: chart_statuses.name,
+                        status_color: chart_statuses.color
+                    })
+                    .from(document_chart_status)
+                    .leftJoin(chart_statuses, eq(document_chart_status.status_id, chart_statuses.id))
+                    .where(inArray(document_chart_status.paperless_id, docIds));
+
+                    for (const s of statuses) {
+                        if (s.status_id) {
+                            chartStatusMap.set(s.paperless_id, {
+                                id: s.status_id,
+                                name: s.status_name || '',
+                                color: s.status_color || 'gray'
+                            });
+                        }
+                    }
+                }
+
                 const enrichedResults = await Promise.all(myRequests.map(async (req: any) => {
                     try {
                         const doc = await PaperlessService.getDocument(req.paperless_id);
@@ -562,7 +639,8 @@ const app = new Elysia()
                             title: doc.title,
                             status: req.status,
                             comment: req.comment,
-                            created: req.created_at
+                            created: req.created_at,
+                            chart_status: chartStatusMap.get(doc.id) || null
                         }
                     } catch (err) {
                         return null;
@@ -1006,6 +1084,30 @@ const app = new Elysia()
                     ...paperlessRejectedIds
                 ]));
 
+                // Fetch chart statuses in bulk
+                const chartStatusMap = new Map<number, { id: number, name: string, color: string }>();
+                if (allRejectedDocIds.length > 0) {
+                    const statuses = await db.select({
+                        paperless_id: document_chart_status.paperless_id,
+                        status_id: document_chart_status.status_id,
+                        status_name: chart_statuses.name,
+                        status_color: chart_statuses.color
+                    })
+                    .from(document_chart_status)
+                    .leftJoin(chart_statuses, eq(document_chart_status.status_id, chart_statuses.id))
+                    .where(inArray(document_chart_status.paperless_id, allRejectedDocIds));
+
+                    for (const s of statuses) {
+                        if (s.status_id) {
+                            chartStatusMap.set(s.paperless_id, {
+                                id: s.status_id,
+                                name: s.status_name || '',
+                                color: s.status_color || 'gray'
+                            });
+                        }
+                    }
+                }
+
                 // Fetch document details from Paperless for these IDs
                 const enrichedDocs = await Promise.all(allRejectedDocIds.map(async (docId) => {
                     try {
@@ -1050,7 +1152,8 @@ const app = new Elysia()
                             requester_name: requesterName,
                             approval_status: 'rejected',
                             approval_comment: comment,
-                            rejected_date: date
+                            rejected_date: date,
+                            chart_status: chartStatusMap.get(docId) || null
                         };
                     } catch (err) {
                         return null; // Document deleted
@@ -1578,6 +1681,31 @@ const app = new Elysia()
                     console.log(`[API] Filtered results: ${results.length}`);
                 }
 
+                // Fetch chart statuses in bulk
+                const docIds = results.map((d: any) => d.id);
+                const chartStatusMap = new Map<number, { id: number, name: string, color: string }>();
+                if (docIds.length > 0) {
+                    const statuses = await db.select({
+                        paperless_id: document_chart_status.paperless_id,
+                        status_id: document_chart_status.status_id,
+                        status_name: chart_statuses.name,
+                        status_color: chart_statuses.color
+                    })
+                    .from(document_chart_status)
+                    .leftJoin(chart_statuses, eq(document_chart_status.status_id, chart_statuses.id))
+                    .where(inArray(document_chart_status.paperless_id, docIds));
+
+                    for (const s of statuses) {
+                        if (s.status_id) {
+                            chartStatusMap.set(s.paperless_id, {
+                                id: s.status_id,
+                                name: s.status_name || '',
+                                color: s.status_color || 'gray'
+                            });
+                        }
+                    }
+                }
+
                 // Enrich with uploader name and permissions
                 const enrichedResults = await Promise.all(results.map(async (doc: any) => {
                     try {
@@ -1610,11 +1738,12 @@ const app = new Elysia()
                             owner_name: tracking[0]?.name || tracking[0]?.uploader_name || 'System',
                             owner_username: tracking[0]?.uploader_name || null,
                             expires_at: tracking[0]?.expires_at,
-                            can_download: canDownload
+                            can_download: canDownload,
+                            chart_status: chartStatusMap.get(doc.id) || null
                         }
                     } catch (enrichErr) {
                         console.error(`[API] Enrich error for doc ${doc.id}:`, enrichErr);
-                        return { ...doc, owner_name: 'Error', can_download: true }
+                        return { ...doc, owner_name: 'Error', can_download: true, chart_status: null }
                     }
                 }));
 
