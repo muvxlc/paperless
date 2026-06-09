@@ -4,8 +4,8 @@ import { authRoutes } from './routes/auth'
 import { jwt } from '@elysiajs/jwt'
 import { PaperlessService } from './services/paperless'
 import { db } from './db'
-import { approvals, document_tracking, users, document_permissions, audit_logs, user_requests } from './db/schema'
-import { eq, desc, and, inArray, lt, sql } from 'drizzle-orm'
+import { approvals, document_tracking, users, document_permissions, audit_logs, user_requests, chart_statuses, document_chart_status } from './db/schema'
+import { eq, desc, and, inArray, lt, sql, or, isNotNull } from 'drizzle-orm'
 
 // Memory storage for short-lived, one-time document view tokens
 const viewTokens = new Map<string, { docId: number; userId: number; expiresAt: number }>();
@@ -16,6 +16,19 @@ function cleanExpiredTokens() {
         if (data.expiresAt < now) {
             viewTokens.delete(token);
         }
+    }
+}
+
+async function sendDiscordNotification(webhookUrl: string | null, message: string) {
+    if (!webhookUrl || !webhookUrl.startsWith('http')) return;
+    try {
+        await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: message })
+        });
+    } catch (err) {
+        console.error('[Discord Webhook] Failed to send notification:', err);
     }
 }
 
@@ -359,6 +372,27 @@ const app = new Elysia()
                     details: `Requested access to document: "${doc.title}"`
                 });
 
+                // Notify Admins/Approvers with Discord webhooks
+                try {
+                    const notifyUsers = await db.select({ discord_webhook: users.discord_webhook })
+                        .from(users)
+                        .where(and(
+                            or(eq(users.role, 'admin'), eq(users.role, 'approver')),
+                            isNotNull(users.discord_webhook)
+                        ));
+                    
+                    const requesterName = user.name ? `${user.name} (${user.username})` : user.username;
+                    const message = `🔔 **New Document Request**\nUser **${requesterName}** has requested access to document: **"${doc.title}"**`;
+                    
+                    for (const nu of notifyUsers) {
+                        if (nu.discord_webhook) {
+                            sendDiscordNotification(nu.discord_webhook, message);
+                        }
+                    }
+                } catch (err) {
+                    console.error('[API] Error sending request-access Discord notification:', err);
+                }
+
                 return { success: true }
             } catch (e: any) {
                 console.error('[API] Error requesting access:', e);
@@ -394,7 +428,7 @@ const app = new Elysia()
                             request_id: req.id, // The ID of the request record itself
                             title: doc.title,
                             owner_id: req.user_id,
-                            owner_name: req.name || req.username,
+                            owner_name: req.name ? `${req.name} (${req.username})` : req.username,
                             created_date: req.created_at,
                             created: req.created_at,
                             tags: doc.tags || []
@@ -550,19 +584,47 @@ const app = new Elysia()
                 })
 
                 // Save Permissions
-                if (finalUserIds && Array.isArray(finalUserIds)) {
-                    // Clear existing if any (undo then redo)
-                    await db.delete(document_permissions).where(eq(document_permissions.paperless_id, docId))
+                if (finalUserIds && Array.isArray(finalUserIds) && finalUserIds.length > 0) {
+                    // Clear existing only for the users being approved to avoid revoking other users
+                    await db.delete(document_permissions)
+                        .where(and(
+                            eq(document_permissions.paperless_id, docId),
+                            inArray(document_permissions.user_id, finalUserIds)
+                        ));
 
-                    if (finalUserIds.length > 0) {
-                        for (const uid of finalUserIds) {
-                            await db.insert(document_permissions).values({
-                                paperless_id: docId,
-                                user_id: uid,
-                                can_download: typeof canDownload === 'boolean' ? canDownload : true
-                            })
+                    for (const uid of finalUserIds) {
+                        await db.insert(document_permissions).values({
+                            paperless_id: docId,
+                            user_id: uid,
+                            can_download: typeof canDownload === 'boolean' ? canDownload : true
+                        })
+                    }
+                }
+
+                // Notify approved users via Discord webhooks
+                try {
+                    if (finalUserIds && finalUserIds.length > 0) {
+                        const approvedUserWebhooks = await db.select({
+                            username: users.username,
+                            name: users.name,
+                            discord_webhook: users.discord_webhook
+                        })
+                        .from(users)
+                        .where(and(
+                            inArray(users.id, finalUserIds),
+                            isNotNull(users.discord_webhook)
+                        ));
+
+                        const message = `✅ **Document Approved**\nYour request for access to document: **"${doc.title}"** has been approved. You can now view it in your dashboard.`;
+
+                        for (const au of approvedUserWebhooks) {
+                            if (au.discord_webhook) {
+                                sendDiscordNotification(au.discord_webhook, message);
+                            }
                         }
                     }
+                } catch (err) {
+                    console.error('[API] Error sending approval Discord notification:', err);
                 }
 
                 return { success: true }
@@ -743,6 +805,24 @@ const app = new Elysia()
                     details: `Document: "${reqDocTitle}". Rejected access request ID ${requestId} by ${user.username}. Comment: ${comment || 'None'}`
                 });
 
+                // Notify requester via Discord webhook
+                try {
+                    const requester = await db.select({
+                        discord_webhook: users.discord_webhook
+                    })
+                    .from(users)
+                    .where(eq(users.id, requestObj.user_id))
+                    .limit(1);
+
+                    if (requester.length > 0 && requester[0].discord_webhook) {
+                        const reasonText = comment ? `Reason: **"${comment}"**` : 'No reason provided.';
+                        const message = `❌ **Request Rejected**\nYour request for access to document: **"${reqDocTitle}"** has been rejected. ${reasonText}`;
+                        sendDiscordNotification(requester[0].discord_webhook, message);
+                    }
+                } catch (err) {
+                    console.error('[API] Error sending reject Discord notification:', err);
+                }
+
                 return { success: true }
             } catch (e: any) {
                 console.error('[API] Error rejecting user request:', e);
@@ -825,6 +905,128 @@ const app = new Elysia()
                 set.status = 500; return { error: e.message }
             }
         })
+        // Get All Charts/Documents
+        .get('/all-charts', async ({ user, set }) => {
+            if (user?.role !== 'approver' && user?.role !== 'admin') {
+                set.status = 403; return 'Forbidden'
+            }
+            try {
+                // Fetch all documents from Paperless
+                const docs = await PaperlessService.getDocuments('');
+                
+                // Fetch tracking, approvals, requests, and chart statuses in bulk to avoid N+1 queries
+                const trackings = await db.select({
+                    paperless_id: document_tracking.paperless_id,
+                    uploader_name: users.username,
+                    name: users.name
+                })
+                .from(document_tracking)
+                .leftJoin(users, eq(document_tracking.uploader_id, users.id));
+
+                const allApprovals = await db.select().from(approvals);
+
+                const allChartStatuses = await db.select({
+                    paperless_id: document_chart_status.paperless_id,
+                    status_id: document_chart_status.status_id,
+                    status_name: chart_statuses.name,
+                    status_color: chart_statuses.color
+                })
+                .from(document_chart_status)
+                .leftJoin(chart_statuses, eq(document_chart_status.status_id, chart_statuses.id));
+
+                // Create maps for lookup
+                const trackingMap = new Map(trackings.map(t => [t.paperless_id, t]));
+                const approvalMap = new Map(allApprovals.map(a => [a.paperless_doc_id, a]));
+                const chartStatusMap = new Map(allChartStatuses.map(cs => [cs.paperless_id, cs]));
+
+                // Enrich documents
+                const enrichedResults = docs.results.map((doc: any) => {
+                    const tracking = trackingMap.get(doc.id);
+                    const approval = approvalMap.get(doc.id);
+                    const cs = chartStatusMap.get(doc.id);
+
+                    const approvalStatus = approval?.status || 'pending';
+
+                    return {
+                        ...doc,
+                        owner_name: tracking?.name || tracking?.uploader_name || 'System',
+                        approval_status: approvalStatus,
+                        approval_comment: approval?.comment || null,
+                        chart_status: cs ? { id: cs.status_id, name: cs.status_name, color: cs.status_color } : null
+                    };
+                });
+
+                return { results: enrichedResults, count: docs.count }
+            } catch (e: any) {
+                console.error('[API] Error fetching all-charts:', e);
+                set.status = 500; return { error: e.message }
+            }
+        })
+        // Get Chart Statuses list
+        .get('/chart-statuses', async ({ user, set }) => {
+            if (user?.role !== 'approver' && user?.role !== 'admin') {
+                set.status = 403; return 'Forbidden'
+            }
+            try {
+                const statuses = await db.select().from(chart_statuses).orderBy(chart_statuses.name);
+                return statuses;
+            } catch (e: any) {
+                set.status = 500; return { error: e.message }
+            }
+        })
+        // Create a Chart Status
+        .post('/chart-statuses', async ({ user, body, set }) => {
+            if (user?.role !== 'admin' && user?.role !== 'approver') {
+                set.status = 403; return 'Forbidden'
+            }
+            const { name, color } = (body || {}) as { name: string, color?: string }
+            if (!name) {
+                set.status = 400; return { error: 'Name is required' }
+            }
+            try {
+                await db.insert(chart_statuses).values({
+                    name,
+                    color: color || 'gray'
+                });
+                return { success: true }
+            } catch (e: any) {
+                set.status = 500; return { error: e.message }
+            }
+        })
+        // Delete a Chart Status
+        .delete('/chart-statuses/:id', async ({ params, user, set }) => {
+            if (user?.role !== 'admin' && user?.role !== 'approver') {
+                set.status = 403; return 'Forbidden'
+            }
+            const statusId = parseInt(params.id)
+            try {
+                await db.delete(chart_statuses).where(eq(chart_statuses.id, statusId));
+                return { success: true }
+            } catch (e: any) {
+                set.status = 500; return { error: e.message }
+            }
+        })
+        // Set Document Chart Status
+        .post('/documents/:id/chart-status', async ({ params, user, body, set }) => {
+            if (user?.role !== 'approver' && user?.role !== 'admin') {
+                set.status = 403; return 'Forbidden'
+            }
+            const docId = parseInt(params.id)
+            const { status_id } = (body || {}) as { status_id: number | null }
+            try {
+                await db.delete(document_chart_status).where(eq(document_chart_status.paperless_id, docId));
+
+                if (status_id !== null) {
+                    await db.insert(document_chart_status).values({
+                        paperless_id: docId,
+                        status_id: status_id
+                    });
+                }
+                return { success: true }
+            } catch (e: any) {
+                set.status = 500; return { error: e.message }
+            }
+        })
         // Search
         .get('/search', async ({ query, user, set }) => {
             // query.q
@@ -865,6 +1067,7 @@ const app = new Elysia()
                 // Fetch user role
                 const u = await db.select().from(users).where(eq(users.id, userId)).limit(1);
                 const userRole = u[0]?.role;
+                const username = u[0]?.username || 'unknown';
 
                 let isAuthorized = false;
                 let forceInline = false;
@@ -1125,6 +1328,7 @@ const app = new Elysia()
             const limit = Number(query.limit) || 20;
             const offset = (page - 1) * limit;
             const q = query.q as string || '';
+            const actionFilter = query.action as string || '';
 
             try {
                 // Build Filter
@@ -1137,10 +1341,17 @@ const app = new Elysia()
                     searchFilters.push(sql`${audit_logs.target_id} LIKE ${searchStr}`);
                 }
 
+                const searchCond = searchFilters.length > 0 ? sql`(${sql.join(searchFilters, sql` OR `)})` : undefined;
+                const actionCond = actionFilter ? eq(audit_logs.action, actionFilter) : undefined;
+
                 // Base Query Condition
                 let whereCondition = undefined;
-                if (searchFilters.length > 0) {
-                    whereCondition = sql`(${sql.join(searchFilters, sql` OR `)})`;
+                if (searchCond && actionCond) {
+                    whereCondition = and(searchCond, actionCond);
+                } else if (searchCond) {
+                    whereCondition = searchCond;
+                } else if (actionCond) {
+                    whereCondition = actionCond;
                 }
 
                 // Get Total Count
@@ -1260,11 +1471,17 @@ const app = new Elysia()
             })
             // List Users
             .get('/', async () => {
-                return await db.select({ id: users.id, username: users.username, name: users.name, role: users.role }).from(users);
+                return await db.select({ 
+                    id: users.id, 
+                    username: users.username, 
+                    name: users.name, 
+                    role: users.role,
+                    discord_webhook: users.discord_webhook
+                }).from(users);
             })
             // Create User
             .post('/', async ({ body, set }: any) => {
-                const { username, password, role, name } = body
+                const { username, password, role, name, discord_webhook } = body
                 if (!username || !password || !role) {
                     set.status = 400; return 'Missing fields'
                 }
@@ -1274,7 +1491,8 @@ const app = new Elysia()
                         username,
                         password: hashedPassword,
                         role,
-                        name: name || null
+                        name: name || null,
+                        discord_webhook: discord_webhook || null
                     })
                     return { success: true }
                 } catch (e: any) {
@@ -1284,7 +1502,7 @@ const app = new Elysia()
             // Update User
             .put('/:id', async ({ params, body, set }: any) => {
                 const id = parseInt(params.id)
-                const { username, password, role, name } = body
+                const { username, password, role, name, discord_webhook } = body
 
                 const updateData: any = { username, role }
                 if (password) {
@@ -1292,6 +1510,9 @@ const app = new Elysia()
                 }
                 if (name !== undefined) {
                     updateData.name = name || null
+                }
+                if (discord_webhook !== undefined) {
+                    updateData.discord_webhook = discord_webhook || null
                 }
 
                 try {

@@ -2,7 +2,8 @@
   <div class="p-8">
     <div class="flex justify-between items-center mb-6">
       <h1 class="text-2xl font-bold">System Audit Logs</h1>
-      <div class="flex gap-4">
+      <div class="flex gap-4 items-center">
+        <USelect v-model="actionFilter" :options="actionOptions" class="w-48" />
         <UInput v-model="q" placeholder="Search logs..." icon="i-heroicons-magnifying-glass" class="w-64" @keyup.enter="fetchLogs" />
         <UButton icon="i-heroicons-arrow-path" color="gray" variant="ghost" @click="fetchLogs" :loading="pending" />
       </div>
@@ -31,11 +32,24 @@ const auth = useAuthStore()
 const logs = ref([])
 const pending = ref(false)
 
-// Pagination & Search
+// Pagination, Search & Filter
 const page = ref(1)
 const pageCount = ref(20)
 const total = ref(0)
 const q = ref('')
+const actionFilter = ref('')
+
+const actionOptions = [
+  { label: 'All Actions', value: '' },
+  { label: 'LOGIN', value: 'LOGIN' },
+  { label: 'VIEW', value: 'VIEW' },
+  { label: 'APPROVE', value: 'APPROVE' },
+  { label: 'REJECT', value: 'REJECT' },
+  { label: 'REJECT_REQUEST', value: 'REJECT_REQUEST' },
+  { label: 'REQUEST_ACCESS', value: 'REQUEST_ACCESS' },
+  { label: 'RESTORE', value: 'RESTORE' },
+  { label: 'DELETE', value: 'DELETE' }
+]
 
 const columns = [
   { key: 'created_at', label: 'Time' },
@@ -71,7 +85,8 @@ async function fetchLogs() {
         params: {
             page: page.value,
             limit: pageCount.value,
-            q: q.value
+            q: q.value,
+            action: actionFilter.value
         }
     })
     
@@ -96,6 +111,11 @@ async function fetchLogs() {
 
 // Watchers
 watch(page, () => {
+    fetchLogs()
+})
+
+watch(actionFilter, () => {
+    page.value = 1
     fetchLogs()
 })
 

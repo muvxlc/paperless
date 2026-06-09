@@ -43,6 +43,10 @@
             <USelect v-model="form.role" :options="roles" />
           </UFormGroup>
 
+          <UFormGroup label="Discord Webhook" help="สำหรับการแจ้งเตือนเมื่อมีคำขอสิทธิ์เข้าถึงหรือการอนุมัติเอกสาร">
+            <UInput v-model="form.discord_webhook" placeholder="https://discord.com/api/webhooks/..." />
+          </UFormGroup>
+
           <div class="flex justify-end gap-2 pt-4">
             <UButton color="gray" variant="ghost" @click="isOpen = false">Cancel</UButton>
             <UButton type="submit" color="black" :loading="saving">Save</UButton>
@@ -68,7 +72,8 @@ const form = reactive({
   username: '',
   password: '',
   name: '',
-  role: 'user'
+  role: 'user',
+  discord_webhook: ''
 })
 
 const roles = [
@@ -118,6 +123,7 @@ function openModal(user = null) {
     form.password = '' // Don't show hash
     form.name = user.name || ''
     form.role = user.role
+    form.discord_webhook = user.discord_webhook || ''
   } else {
     isEditing.value = false
     form.id = null
@@ -125,6 +131,7 @@ function openModal(user = null) {
     form.password = ''
     form.name = ''
     form.role = 'user'
+    form.discord_webhook = ''
   }
   isOpen.value = true
 }
@@ -141,13 +148,13 @@ async function saveUser() {
       await $fetch(`${config.public.apiBase}/api/users/${form.id}`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${auth.token}` },
-        body: { username: form.username, password: form.password || undefined, name: form.name, role: form.role }
+        body: { username: form.username, password: form.password || undefined, name: form.name, role: form.role, discord_webhook: form.discord_webhook }
       })
     } else {
       await $fetch(`${config.public.apiBase}/api/users`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${auth.token}` },
-        body: { username: form.username, password: form.password, name: form.name, role: form.role }
+        body: { username: form.username, password: form.password, name: form.name, role: form.role, discord_webhook: form.discord_webhook }
       })
     }
     isOpen.value = false
