@@ -8,6 +8,7 @@ export const users = mysqlTable("users", {
     name: varchar("name", { length: 255 }),
     thaid_pid: varchar("thaid_pid", { length: 255 }),
     authentik_sub: varchar("authentik_sub", { length: 255 }),
+    discord_webhook: varchar("discord_webhook", { length: 512 }),
 });
 
 export const approvals = mysqlTable("approvals", {
@@ -52,3 +53,18 @@ export const user_requests = mysqlTable("user_requests", {
     comment: text("comment"),
     created_at: timestamp("created_at").defaultNow(),
 });
+
+export const chart_statuses = mysqlTable("chart_statuses", {
+    id: serial("id").primaryKey(),
+    name: varchar("name", { length: 255 }).notNull().unique(),
+    color: varchar("color", { length: 50 }).default("gray").notNull(),
+    created_at: timestamp("created_at").defaultNow(),
+});
+
+export const document_chart_status = mysqlTable("document_chart_status", {
+    id: serial("id").primaryKey(),
+    paperless_id: int("paperless_id").notNull().unique(),
+    status_id: int("status_id").references(() => chart_statuses.id, { onDelete: "cascade" }),
+    updated_at: timestamp("updated_at").defaultNow(),
+});
+

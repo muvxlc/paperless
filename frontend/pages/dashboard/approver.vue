@@ -9,20 +9,28 @@
       <div class="flex items-center gap-3 w-full sm:w-auto">
         <span class="text-xs font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">Filter by Uploader:</span>
         <USelect v-model="selectedUser" :options="userOptions" placeholder="All Users" class="w-48" />
+        <UButton 
+          v-if="activeTab === 0" 
+          icon="i-heroicons-tag" 
+          color="indigo" 
+          variant="soft" 
+          @click="isStatusModalOpen = true"
+          label="Manage Statuses"
+        />
         <UButton icon="i-heroicons-arrow-path" color="gray" variant="ghost" @click="fetchData(true)" :loading="pending" />
       </div>
     </div>
 
     <!-- Stats Summary Cards -->
     <div class="grid grid-cols-1 sm:grid-cols-4 gap-6">
-      <!-- Pending Card -->
+      <!-- All Charts Card -->
       <div class="bg-gradient-to-br from-blue-400 to-indigo-500 p-5 rounded-2xl text-white shadow-xs relative overflow-hidden group hover:scale-[1.02] transition-transform duration-200 cursor-pointer" @click="activeTab = 0">
         <div class="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-300">
-          <UIcon name="i-heroicons-clock" class="w-20 h-20" />
+          <UIcon name="i-heroicons-document-duplicate" class="w-20 h-20" />
         </div>
-        <p class="text-xs opacity-90 font-medium mb-1">Pending Review</p>
+        <p class="text-xs opacity-90 font-medium mb-1">All Charts</p>
         <p class="text-3xl font-extrabold tracking-tight">{{ pendingDocs.length }}</p>
-        <p class="text-[11px] opacity-75 mt-1">Requires approval</p>
+        <p class="text-[11px] opacity-75 mt-1">Total documents in system</p>
       </div>
 
       <!-- User Requests Card -->
@@ -80,55 +88,86 @@
                 <div class="flex items-start gap-4 min-w-0 flex-1">
                   <div class="p-2 bg-gray-50 dark:bg-gray-800 rounded-xl text-gray-500 shrink-0">
                     <UIcon 
-                      :name="item.key === 'pending' || item.key === 'requests' ? 'i-heroicons-document-magnifying-glass' : (item.key === 'approved' ? 'i-heroicons-check-badge' : 'i-heroicons-x-circle')" 
-                      :class="['text-2xl', item.key === 'pending' ? 'text-blue-500' : (item.key === 'requests' ? 'text-amber-500' : (item.key === 'approved' ? 'text-green-500' : 'text-red-500'))]" 
+                      :name="item.key === 'requests' || item.key === 'all-charts' ? 'i-heroicons-document-magnifying-glass' : (item.key === 'approved' || (doc.approval_status === 'approved' && item.key === 'all-charts') ? 'i-heroicons-check-badge' : 'i-heroicons-x-circle')" 
+                      :class="['text-2xl', item.key === 'requests' || (doc.approval_status === 'pending' && item.key === 'all-charts') ? 'text-blue-500' : (item.key === 'approved' || (doc.approval_status === 'approved' && item.key === 'all-charts') ? 'text-green-500' : 'text-red-500')]" 
                     />
                   </div>
                   <div class="min-w-0 flex-1">
-                    <h3 class="font-bold text-gray-800 dark:text-white truncate">{{ doc.title }}</h3>
-                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 mt-1.5">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <h3 class="font-bold text-gray-800 dark:text-white truncate">{{ doc.title }}</h3>
+                      <!-- Chart Status Badge -->
+                      <UBadge v-if="doc.chart_status" :color="doc.chart_status.color || 'gray'" variant="solid" size="xs" class="capitalize shrink-0">
+                        {{ doc.chart_status.name }}
+                      </UBadge>
+                      <!-- Approval Status Badge (Only for All Charts) -->
+                      <UBadge v-slot:default v-if="item.key === 'all-charts'" :color="doc.approval_status === 'approved' ? 'green' : (doc.approval_status === 'rejected' ? 'red' : 'amber')" variant="subtle" size="xs" class="capitalize shrink-0">
+                        {{ doc.approval_status }}
+                      </UBadge>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-gray-500 mt-2">
                       <span class="flex items-center gap-1">
                         <UIcon name="i-heroicons-user" class="w-3.5 h-3.5" />
-                        Uploaded by: <span class="font-semibold text-orange-500">{{ doc.owner_name || 'System' }}</span>
+                        <span>{{ item.key === 'requests' ? 'Requested by' : 'Uploaded by' }}:</span>
+                        <span class="font-semibold text-orange-500">{{ doc.owner_name || 'System' }}</span>
                       </span>
                       <span>&bull;</span>
                       <span class="flex items-center gap-1">
                         <UIcon name="i-heroicons-calendar" class="w-3.5 h-3.5" />
                         Uploaded: {{ formatTimestamp(doc.created_date || doc.created) }}
                       </span>
-                      <span v-if="doc.expires_at" class="flex items-center gap-1 text-red-500">
+                      <span v-slot:default v-if="doc.expires_at" class="flex items-center gap-1 text-red-500">
                         <span>&bull;</span>
                         <UIcon name="i-heroicons-clock" class="w-3.5 h-3.5" />
                         Expires: {{ formatTimestamp(doc.expires_at) }}
                       </span>
-                      <span v-if="doc.comment && item.key === 'rejected'" class="flex items-center gap-1 text-red-500 font-semibold">
+                      <span v-slot:default v-if="doc.comment || doc.approval_comment" class="flex items-center gap-1 text-red-500 font-semibold">
                         <span>&bull;</span>
                         <UIcon name="i-heroicons-chat-bubble-left-right" class="w-3.5 h-3.5" />
-                        Reason: {{ doc.comment }}
+                        Reason: {{ doc.comment || doc.approval_comment }}
+                      </span>
+                      
+                      <!-- Inline Chart Status Dropdown -->
+                      <span class="flex items-center gap-2 lg:ml-4 bg-gray-50 dark:bg-gray-800/80 px-2 py-0.5 rounded-lg border border-gray-100 dark:border-gray-800">
+                        <span class="text-[10px] font-medium text-gray-400">Chart Status:</span>
+                        <select 
+                          :value="doc.chart_status?.id || ''" 
+                          @change="event => updateDocChartStatus(doc.id, event.target.value)"
+                          class="bg-transparent border-none text-xs font-semibold text-gray-700 dark:text-gray-300 focus:ring-0 cursor-pointer p-0.5 pr-4 capitalize"
+                        >
+                          <option value="">None</option>
+                          <option v-for="s in availableChartStatuses" :key="s.id" :value="s.id">
+                            {{ s.name }}
+                          </option>
+                        </select>
                       </span>
                     </div>
                   </div>
                 </div>
                 
                 <div class="flex items-center gap-2 self-end sm:self-center shrink-0">
-                  <!-- View: All Tabs -->
-                  <UButton color="gray" variant="ghost" icon="i-heroicons-eye" :to="`${config.public.apiBase}/api/download/${doc.id}?token=${auth.token}&inline=true`" target="_blank">
+                  <!-- View: Secure wrapper -->
+                  <UButton color="primary" variant="ghost" icon="i-heroicons-eye" :to="`${config.public.apiBase}/api/view/${doc.id}?token=${auth.token}`" target="_blank">
                     View
+                  </UButton>
+
+                  <!-- Download -->
+                  <UButton color="gray" variant="ghost" icon="i-heroicons-arrow-down-tray" :to="`${config.public.apiBase}/api/download/${doc.id}?token=${auth.token}`" target="_blank">
+                    Download
                   </UButton>
                   
                   <!-- Approve: Pending, Requests & Rejected -->
-                  <UButton v-if="item.key === 'pending' || item.key === 'requests' || item.key === 'rejected'" color="green" icon="i-heroicons-check" @click="openApproveModal(doc.id, doc.owner_id)">
+                  <UButton v-if="item.key === 'requests' || item.key === 'rejected' || (item.key === 'all-charts' && doc.approval_status !== 'approved')" color="green" icon="i-heroicons-check" @click="openApproveModal(doc.id, doc.owner_id)">
                     Approve
                   </UButton>
                   
                   <!-- Reject: Pending & Requests Only -->
-                  <UButton v-if="item.key === 'pending' || item.key === 'requests'" color="red" variant="soft" icon="i-heroicons-x-mark" label="Reject" @click="reject(doc.id, item.key === 'requests' ? doc.request_id : null)" />
+                  <UButton v-if="item.key === 'requests' || (item.key === 'all-charts' && doc.approval_status === 'pending')" color="red" variant="soft" icon="i-heroicons-x-mark" label="Reject" @click="reject(doc.id, item.key === 'requests' ? doc.request_id : null)" />
                   
                   <!-- Undo Approval: Approved Only -->
-                  <UButton v-if="item.key === 'approved'" color="orange" variant="soft" icon="i-heroicons-arrow-uturn-left" label="Undo Approval" @click="restore(doc.id, true)" />
+                  <UButton v-if="item.key === 'approved' || (item.key === 'all-charts' && doc.approval_status === 'approved')" color="orange" variant="soft" icon="i-heroicons-arrow-uturn-left" label="Undo" @click="restore(doc.id, true)" />
 
                   <!-- Restore: Rejected Only -->
-                  <UButton v-if="item.key === 'rejected'" color="gray" variant="soft" icon="i-heroicons-arrow-path" label="Restore" @click="restore(doc.id)" />
+                  <UButton v-if="item.key === 'rejected' || (item.key === 'all-charts' && doc.approval_status === 'rejected')" color="gray" variant="soft" icon="i-heroicons-arrow-path" label="Restore" @click="restore(doc.id)" />
 
                   <!-- Delete permanently (All Tabs) -->
                   <UButton color="red" variant="ghost" icon="i-heroicons-trash" @click="deleteDoc(doc.id, doc.title)" />
@@ -193,13 +232,66 @@
             <UButton color="green" :loading="approving" @click="confirmApprove">Confirm Approval</UButton>
           </div>
         </template>
+    <!-- Chart Status Management Modal -->
+    <UModal v-model="isStatusModalOpen">
+      <UCard :ui="{ ring: '', divide: 'divide-y divide-gray-100 dark:divide-gray-800' }">
+        <template #header>
+          <div class="flex items-center justify-between">
+            <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white">
+              Manage Chart Statuses
+            </h3>
+            <UButton color="gray" variant="ghost" icon="i-heroicons-x-mark" class="-my-1" @click="isStatusModalOpen = false" />
+          </div>
+        </template>
+
+        <div class="p-4 space-y-4">
+          <!-- Add Status Form -->
+          <form @submit.prevent="addChartStatus" class="flex items-end gap-2 p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl border border-gray-100 dark:border-gray-800">
+            <UFormGroup label="Status Name" required class="flex-1">
+              <UInput v-model="newStatusForm.name" placeholder="เช่น เคสคดี, เคสตาย" size="sm" />
+            </UFormGroup>
+            
+            <UFormGroup label="Color" required class="w-32">
+              <USelect v-model="newStatusForm.color" :options="colorOptions" size="sm" />
+            </UFormGroup>
+            
+            <UButton type="submit" color="black" size="sm" :loading="addingStatus">
+              Add
+            </UButton>
+          </form>
+
+          <!-- Statuses List -->
+          <div class="space-y-2">
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider pl-1">Available Statuses</p>
+            <div v-if="availableChartStatuses.length === 0" class="text-center py-4 text-xs text-gray-500">
+              No custom statuses defined yet.
+            </div>
+            <div 
+              v-else
+              v-for="status in availableChartStatuses" 
+              :key="status.id"
+              class="flex items-center justify-between p-2.5 rounded-lg border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900"
+            >
+              <UBadge :color="status.color || 'gray'" variant="solid" class="capitalize">
+                {{ status.name }}
+              </UBadge>
+              <UButton 
+                color="red" 
+                variant="ghost" 
+                icon="i-heroicons-trash" 
+                size="xs" 
+                @click="deleteChartStatus(status.id)" 
+              />
+            </div>
+          </div>
+        </div>
       </UCard>
     </UModal>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, reactive } from 'vue'
 
 const config = useRuntimeConfig()
 const auth = useAuthStore()
@@ -213,6 +305,31 @@ const approving = ref(false)
 const activeTab = ref(0)
 const selectedUser = ref(null)
 
+// Chart Status Management State
+const isStatusModalOpen = ref(false)
+const addingStatus = ref(false)
+const availableChartStatuses = ref([])
+const newStatusForm = reactive({ name: '', color: 'gray' })
+const colorOptions = [
+  { label: 'Gray', value: 'gray' },
+  { label: 'Red', value: 'red' },
+  { label: 'Orange', value: 'orange' },
+  { label: 'Amber', value: 'amber' },
+  { label: 'Yellow', value: 'yellow' },
+  { label: 'Green', value: 'green' },
+  { label: 'Emerald', value: 'emerald' },
+  { label: 'Teal', value: 'teal' },
+  { label: 'Cyan', value: 'cyan' },
+  { label: 'Sky', value: 'sky' },
+  { label: 'Blue', value: 'blue' },
+  { label: 'Indigo', value: 'indigo' },
+  { label: 'Violet', value: 'violet' },
+  { label: 'Purple', value: 'purple' },
+  { label: 'Fuchsia', value: 'fuchsia' },
+  { label: 'Pink', value: 'pink' },
+  { label: 'Rose', value: 'rose' }
+]
+
 // Approval Modal State
 const isApproveModalOpen = ref(false)
 const selectedDocId = ref(null)
@@ -221,7 +338,7 @@ const selectedExpiration = ref(5) // Default 5 days
 const allowDownload = ref(false) // Default false (View Only)
 
 const tabs = [
-  { key: 'pending', label: 'Pending Approvals' },
+  { key: 'all-charts', label: 'All Charts' },
   { key: 'requests', label: 'User Requests' },
   { key: 'approved', label: 'Recently Approved' },
   { key: 'rejected', label: 'Rejected Documents' }
@@ -314,8 +431,8 @@ async function fetchUsers() {
 async function fetchData(forceRefetch = false) {
   pending.value = true
   try {
-    const [pendingRes, requestsRes, approvedRes, rejectedRes] = await Promise.all([
-      $fetch(`${config.public.apiBase}/api/pending`, {
+    const [allChartsRes, requestsRes, approvedRes, rejectedRes] = await Promise.all([
+      $fetch(`${config.public.apiBase}/api/all-charts`, {
         headers: { 'Authorization': `Bearer ${auth.token}` },
         params: forceRefetch ? { t: Date.now() } : {}
       }),
@@ -333,7 +450,7 @@ async function fetchData(forceRefetch = false) {
       })
     ])
     
-    pendingDocs.value = pendingRes?.results || (Array.isArray(pendingRes) ? pendingRes : [])
+    pendingDocs.value = allChartsRes?.results || (Array.isArray(allChartsRes) ? allChartsRes : [])
     requestDocs.value = requestsRes?.results || (Array.isArray(requestsRes) ? requestsRes : [])
     approvedDocs.value = approvedRes?.results || (Array.isArray(approvedRes) ? approvedRes : [])
     rejectedDocs.value = rejectedRes?.results || (Array.isArray(rejectedRes) ? rejectedRes : [])
@@ -341,6 +458,65 @@ async function fetchData(forceRefetch = false) {
     console.error('Fetch data error:', err)
   } finally {
     pending.value = false
+  }
+}
+
+async function fetchChartStatuses() {
+  try {
+    const data = await $fetch(`${config.public.apiBase}/api/chart-statuses`, {
+      headers: { 'Authorization': `Bearer ${auth.token}` }
+    })
+    if (data) {
+      availableChartStatuses.value = data
+    }
+  } catch (err) {
+    console.error('Fetch chart statuses error:', err)
+  }
+}
+
+async function addChartStatus() {
+  if (!newStatusForm.name.trim()) return
+  addingStatus.value = true
+  try {
+    await $fetch(`${config.public.apiBase}/api/chart-statuses`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${auth.token}` },
+      body: { name: newStatusForm.name.trim(), color: newStatusForm.color }
+    })
+    newStatusForm.name = ''
+    newStatusForm.color = 'gray'
+    await fetchChartStatuses()
+  } catch (err) {
+    alert('Failed to add status: ' + err.message)
+  } finally {
+    addingStatus.value = false
+  }
+}
+
+async function deleteChartStatus(id) {
+  if (!confirm('Are you sure you want to delete this status? Documents with this status will be reset to None.')) return
+  try {
+    await $fetch(`${config.public.apiBase}/api/chart-statuses/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${auth.token}` }
+    })
+    await fetchChartStatuses()
+    fetchData(true)
+  } catch (err) {
+    alert('Failed to delete status: ' + err.message)
+  }
+}
+
+async function updateDocChartStatus(docId, statusId) {
+  try {
+    await $fetch(`${config.public.apiBase}/api/documents/${docId}/chart-status`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${auth.token}` },
+      body: { status_id: statusId ? parseInt(statusId) : null }
+    })
+    fetchData(true)
+  } catch (err) {
+    alert('Failed to update chart status: ' + err.message)
   }
 }
 
@@ -395,6 +571,7 @@ async function restore(id, isUndo = false) {
 
 onMounted(() => {
     fetchUsers()
+    fetchChartStatuses()
     fetchData()
 })
 </script>

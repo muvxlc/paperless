@@ -12,5 +12,5 @@ export default defineConfig({
     },
     verbose: true,
     strict: true,
-    tablesFilter: ["users", "approvals", "document_tracking", "document_permissions", "audit_logs", "user_requests"],
+    tablesFilter: ["users", "approvals", "document_tracking", "document_permissions", "audit_logs", "user_requests", "chart_statuses", "document_chart_status"],
 });
