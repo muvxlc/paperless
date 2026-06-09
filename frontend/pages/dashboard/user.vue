@@ -97,8 +97,7 @@
                         color="gray" 
                         variant="ghost" 
                         icon="i-heroicons-eye" 
-                        :to="`${config.public.apiBase}/api/download/${doc.id}?token=${auth.token}&inline=true`" 
-                        target="_blank"
+                        @click="openRestrictedView(doc)"
                       >
                         View
                       </UButton>
@@ -355,7 +354,7 @@
         <UCard :ui="{ base: 'h-full flex flex-col', body: { base: 'flex-1 p-0' } }">
             <template #header>
                 <div class="flex items-center justify-between">
-                    <h3 class="font-bold text-gray-800 dark:text-white">{{ currentDoc?.title }} (View Only)</h3>
+                    <h3 class="font-bold text-gray-800 dark:text-white">{{ currentDoc?.title }}{{ currentDoc?.can_download === false ? ' (View Only)' : '' }}</h3>
                     <UButton color="gray" variant="ghost" icon="i-heroicons-x-mark" @click="isViewerOpen = false" />
                 </div>
             </template>
