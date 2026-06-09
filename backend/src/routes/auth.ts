@@ -12,6 +12,7 @@ import {
     getAuthentikUserInfo,
     getFrontendUrl
 } from "../services/oidc";
+import crypto from "crypto";
 
 export const authRoutes = new Elysia({ prefix: "/auth" })
     .use(
@@ -74,10 +75,19 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             }),
         }
     )
-    .get("/thaid/login", ({ set }) => {
+    .get("/thaid/login", ({ cookie: { thaid_state }, set }) => {
         try {
             console.log("[OIDC] Initiating DOPA/ThaID login redirect...");
-            const authUrl = getThaIDAuthUrl();
+            const state = crypto.randomBytes(16).toString("hex");
+            thaid_state.set({
+                value: state,
+                httpOnly: true,
+                maxAge: 300, // 5 minutes
+                path: '/',
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'lax'
+            });
+            const authUrl = getThaIDAuthUrl(state);
             console.log("[OIDC] DOPA/ThaID Auth URL generated:", authUrl);
             return Response.redirect(authUrl, 302);
         } catch (e: any) {
@@ -86,12 +96,24 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             return { error: e.message };
         }
     })
-    .get("/thaid/callback", async ({ query, jwt, set, headers }) => {
+    .get("/thaid/callback", async ({ query, jwt, set, headers, cookie: { thaid_state } }) => {
         const code = query.code as string;
+        const state = query.state as string;
+        
         if (!code) {
             set.status = 400;
             return { error: "Authorization code missing" };
         }
+
+        // Verify state to prevent CSRF
+        if (!state || state !== thaid_state.value) {
+            console.warn(`[OIDC CSRF Warning] State mismatch. Query state: ${state}, Cookie state: ${thaid_state.value}`);
+            set.status = 400;
+            return { error: "CSRF state verification failed" };
+        }
+
+        // Clear state cookie
+        thaid_state.remove();
 
         try {
             // Exchange code for token
@@ -160,10 +182,19 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             return { error: e.message };
         }
     })
-    .get("/authentik/login", ({ set }) => {
+    .get("/authentik/login", ({ cookie: { authentik_state }, set }) => {
         try {
             console.log("[OIDC] Initiating Authentik login redirect...");
-            const authUrl = getAuthentikAuthUrl();
+            const state = crypto.randomBytes(16).toString("hex");
+            authentik_state.set({
+                value: state,
+                httpOnly: true,
+                maxAge: 300, // 5 minutes
+                path: '/',
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'lax'
+            });
+            const authUrl = getAuthentikAuthUrl(state);
             console.log("[OIDC] Authentik Auth URL generated:", authUrl);
             return Response.redirect(authUrl, 302);
         } catch (e: any) {
@@ -172,12 +203,24 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             return { error: e.message };
         }
     })
-    .get("/authentik/callback", async ({ query, jwt, set, headers }) => {
+    .get("/authentik/callback", async ({ query, jwt, set, headers, cookie: { authentik_state } }) => {
         const code = query.code as string;
+        const state = query.state as string;
+        
         if (!code) {
             set.status = 400;
             return { error: "Authorization code missing" };
         }
+
+        // Verify state to prevent CSRF
+        if (!state || state !== authentik_state.value) {
+            console.warn(`[OIDC CSRF Warning] State mismatch. Query state: ${state}, Cookie state: ${authentik_state.value}`);
+            set.status = 400;
+            return { error: "CSRF state verification failed" };
+        }
+
+        // Clear state cookie
+        authentik_state.remove();
 
         try {
             // Exchange code for token
