@@ -238,7 +238,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             }
 
             // Determine role based on groups
-            let mappedRole: 'admin' | 'staff' | 'approver' | 'user' = 'user';
+            let mappedRole: 'admin' | 'staff' | 'approver' | 'user' | null = null;
             if (userInfo.groups && Array.isArray(userInfo.groups)) {
                 if (userInfo.groups.includes("admin")) {
                     mappedRole = "admin";
@@ -256,8 +256,17 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             if (existingBySub) {
                 userRecord = existingBySub;
                 // Update name/role if changed
-                if (userRecord.name !== name || userRecord.role !== mappedRole) {
-                    await db.update(users).set({ name, role: mappedRole }).where(eq(users.id, userRecord.id)).execute();
+                const updateFields: any = {};
+                if (userRecord.name !== name) {
+                    updateFields.name = name;
+                }
+                if (mappedRole && userRecord.role !== mappedRole) {
+                    updateFields.role = mappedRole;
+                }
+                if (Object.keys(updateFields).length > 0) {
+                    await db.update(users).set(updateFields).where(eq(users.id, userRecord.id)).execute();
+                    // Update userRecord locally
+                    userRecord = { ...userRecord, ...updateFields };
                 }
             } else {
                 // Fallback: check if username = preferredUsername exists
@@ -265,7 +274,12 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
                 if (existingByUsername) {
                     userRecord = existingByUsername;
                     // Link with authentik_sub
-                    await db.update(users).set({ authentik_sub: sub, name, role: mappedRole }).where(eq(users.id, userRecord.id)).execute();
+                    const updateFields: any = { authentik_sub: sub, name };
+                    if (mappedRole) {
+                        updateFields.role = mappedRole;
+                    }
+                    await db.update(users).set(updateFields).where(eq(users.id, userRecord.id)).execute();
+                    userRecord = { ...userRecord, ...updateFields };
                 } else {
                     // Create new user
                     const randomPassword = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -274,7 +288,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
                     await db.insert(users).values({
                         username: preferredUsername,
                         password: hashedPassword,
-                        role: mappedRole,
+                        role: mappedRole || "user",
                         name,
                         authentik_sub: sub
                     });

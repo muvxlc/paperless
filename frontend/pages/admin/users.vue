@@ -73,6 +73,7 @@ const form = reactive({
 
 const roles = [
   { label: 'Admin', value: 'admin' },
+  { label: 'Staff', value: 'staff' },
   { label: 'Approver', value: 'approver' },
   { label: 'User', value: 'user' }
 ]
@@ -88,6 +89,7 @@ const columns = [
 function getRoleColor(role) {
   switch (role) {
     case 'admin': return 'red'
+    case 'staff': return 'blue'
     case 'approver': return 'orange'
     case 'user': return 'green'
     default: return 'gray'
@@ -95,6 +97,7 @@ function getRoleColor(role) {
 }
 
 async function fetchUsers() {
+  if (!auth.isAuthenticated) return
   loading.value = true
   try {
     // Reuse the generic /api/users endpoint which we upgraded to support full list for admins
