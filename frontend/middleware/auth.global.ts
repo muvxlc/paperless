@@ -1,8 +1,8 @@
 export default defineNuxtRouteMiddleware((to, from) => {
     const auth = useAuthStore()
 
-    // If user is not authenticated and trying to access dashboard, redirect to login
-    if (!auth.isAuthenticated && to.path.startsWith('/dashboard')) {
+    // If user is not authenticated and trying to access dashboard/admin or the root page /, redirect to login
+    if (!auth.isAuthenticated && (to.path.startsWith('/dashboard') || to.path.startsWith('/admin') || to.path === '/')) {
         return navigateTo('/login')
     }
 
@@ -28,6 +28,9 @@ export default defineNuxtRouteMiddleware((to, from) => {
         return navigateTo('/')
     }
     if (to.path.startsWith('/dashboard/admin') && auth.role !== 'admin') {
+        return navigateTo('/')
+    }
+    if (to.path.startsWith('/admin') && auth.role !== 'admin') {
         return navigateTo('/')
     }
 })

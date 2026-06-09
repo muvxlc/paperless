@@ -95,6 +95,7 @@ function getRoleColor(role) {
 }
 
 async function fetchUsers() {
+  if (!auth.isAuthenticated) return
   loading.value = true
   try {
     // Reuse the generic /api/users endpoint which we upgraded to support full list for admins
