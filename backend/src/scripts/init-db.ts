@@ -28,6 +28,16 @@ async function initDB() {
         `);
         console.log(" - Checked/Created table: users");
 
+        // Ensure display_name, thaid_pid, and authentik_sub columns exist in users table
+        try {
+            await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(255) NULL");
+            await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS thaid_pid VARCHAR(255) NULL UNIQUE");
+            await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS authentik_sub VARCHAR(255) NULL UNIQUE");
+            console.log(" - Checked/Added OIDC columns to users table");
+        } catch (alterError) {
+            console.warn(" - Warning while checking/altering users table:", alterError);
+        }
+
         // 2. Approvals Table
         await connection.execute(`
             CREATE TABLE IF NOT EXISTS approvals (

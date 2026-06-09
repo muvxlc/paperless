@@ -5,6 +5,9 @@ export const users = mysqlTable("users", {
     username: varchar("username", { length: 255 }).notNull().unique(),
     password: varchar("password", { length: 255 }).notNull(), // Hashed password
     role: mysqlEnum("role", ["admin", "staff", "approver", "user"]).default("user").notNull(),
+    display_name: varchar("display_name", { length: 255 }),
+    thaid_pid: varchar("thaid_pid", { length: 255 }),
+    authentik_sub: varchar("authentik_sub", { length: 255 }),
 });
 
 export const approvals = mysqlTable("approvals", {
