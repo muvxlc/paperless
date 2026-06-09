@@ -421,8 +421,12 @@ const app = new Elysia()
                     set.status = 404; return { error: 'Pending request not found.' }
                 }
 
-                // Delete the request
-                await db.delete(user_requests).where(eq(user_requests.id, existing[0].id));
+                // Delete all pending requests for this user and this document
+                await db.delete(user_requests).where(and(
+                    eq(user_requests.paperless_id, docId),
+                    eq(user_requests.user_id, user.id),
+                    eq(user_requests.status, 'pending')
+                ));
 
                 // Get document to check tags
                 const doc = await PaperlessService.getDocument(docId);
@@ -1684,6 +1688,22 @@ console.log(`🦊 Elysia is running at ${app.server?.hostname}:${app.server?.por
 async function syncStalePermissions() {
     console.log('[Sync] Starting stale permissions cleanup...');
     try {
+        // 0. Clean up duplicate pending user requests (keep only the newest one per user per document)
+        try {
+            await db.execute(sql`
+                DELETE ur1 FROM user_requests ur1
+                INNER JOIN user_requests ur2 
+                ON ur1.user_id = ur2.user_id 
+                AND ur1.paperless_id = ur2.paperless_id 
+                AND ur1.status = 'pending'
+                AND ur2.status = 'pending'
+                AND ur1.id < ur2.id
+            `);
+            console.log('[Sync] Cleaned up duplicate pending user requests.');
+        } catch (dupErr) {
+            console.error('[Sync] Error cleaning up duplicate user requests:', dupErr);
+        }
+
         const approvedId = await PaperlessService.getOrCreateTag('Approved');
         
         // 1. Get all unique document IDs in document_permissions
