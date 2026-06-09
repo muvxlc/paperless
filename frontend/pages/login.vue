@@ -3,7 +3,7 @@
     <UCard class="w-full max-w-md shadow-lg ring-1 ring-gray-100 dark:ring-gray-800 rounded-3xl p-4">
       <template #header>
         <div class="text-center py-4">
-          <span class="text-4xl">👋</span>
+          <span class="text-4xl">📄</span>
           <h1 class="text-2xl font-bold text-gray-950 dark:text-white mt-3">Welcome to Paperless</h1>
           <p class="text-xs text-gray-400 mt-1">Please enter your credentials or use Single Sign-On</p>
         </div>
