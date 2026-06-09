@@ -136,20 +136,23 @@
           <div class="space-y-3 text-xs">
             <div class="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
               <span class="text-gray-500 dark:text-gray-400">Server API:</span>
-              <UBadge color="green" variant="subtle" size="sm" class="flex items-center gap-1">
-                <span class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> Online
+              <UBadge :color="systemStatus.server === 'active' ? 'green' : 'red'" variant="subtle" size="sm" class="flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full" :class="systemStatus.server === 'active' ? 'bg-green-500 animate-pulse' : 'bg-red-500'"></span>
+                {{ systemStatus.server === 'active' ? 'Active' : 'Inactive' }}
               </UBadge>
             </div>
             <div class="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
               <span class="text-gray-500 dark:text-gray-400">Database:</span>
-              <UBadge color="green" variant="subtle" size="sm" class="flex items-center gap-1">
-                <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span> Connected
+              <UBadge :color="systemStatus.database === 'active' ? 'green' : 'red'" variant="subtle" size="sm" class="flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full" :class="systemStatus.database === 'active' ? 'bg-green-500' : 'bg-red-500'"></span>
+                {{ systemStatus.database === 'active' ? 'Active' : 'Inactive' }}
               </UBadge>
             </div>
             <div class="flex justify-between items-center py-2">
               <span class="text-gray-500 dark:text-gray-400">Paperless Service:</span>
-              <UBadge color="green" variant="subtle" size="sm" class="flex items-center gap-1">
-                <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span> Active
+              <UBadge :color="systemStatus.paperless === 'active' ? 'green' : 'red'" variant="subtle" size="sm" class="flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full" :class="systemStatus.paperless === 'active' ? 'bg-green-500' : 'bg-red-500'"></span>
+                {{ systemStatus.paperless === 'active' ? 'Active' : 'Inactive' }}
               </UBadge>
             </div>
           </div>
@@ -172,6 +175,11 @@ const rejectedCount = ref(0)
 const usersCount = ref(0)
 const recentLogs = ref([])
 const loading = ref(false)
+const systemStatus = ref({
+  server: 'inactive',
+  database: 'inactive',
+  paperless: 'inactive'
+})
 
 function formatTimestamp(ts) {
   if (!ts) return ''
@@ -183,12 +191,16 @@ function formatTimestamp(ts) {
 async function fetchDashboardStats() {
   loading.value = true
   try {
-    const [pendingRes, approvedRes, rejectedRes, usersRes, logsRes] = await Promise.all([
+    const [pendingRes, approvedRes, rejectedRes, usersRes, logsRes, statusRes] = await Promise.all([
       $fetch(`${config.public.apiBase}/api/pending`, { headers: { 'Authorization': `Bearer ${auth.token}` } }),
       $fetch(`${config.public.apiBase}/api/approved`, { headers: { 'Authorization': `Bearer ${auth.token}` } }),
       $fetch(`${config.public.apiBase}/api/rejected`, { headers: { 'Authorization': `Bearer ${auth.token}` } }),
       $fetch(`${config.public.apiBase}/api/users`, { headers: { 'Authorization': `Bearer ${auth.token}` } }),
-      $fetch(`${config.public.apiBase}/api/logs?limit=5`, { headers: { 'Authorization': `Bearer ${auth.token}` } })
+      $fetch(`${config.public.apiBase}/api/logs?limit=5`, { headers: { 'Authorization': `Bearer ${auth.token}` } }),
+      $fetch(`${config.public.apiBase}/api/status`, { headers: { 'Authorization': `Bearer ${auth.token}` } }).catch(err => {
+        console.error('Fetch system status error:', err)
+        return { server: 'inactive', database: 'inactive', paperless: 'inactive' }
+      })
     ])
     
     pendingCount.value = pendingRes?.results?.length || pendingRes?.count || 0
@@ -196,6 +208,7 @@ async function fetchDashboardStats() {
     rejectedCount.value = rejectedRes?.results?.length || rejectedRes?.count || 0
     usersCount.value = usersRes?.length || 0
     recentLogs.value = logsRes?.results || []
+    systemStatus.value = statusRes || { server: 'inactive', database: 'inactive', paperless: 'inactive' }
   } catch (err) {
     console.error('Fetch stats error:', err)
   } finally {
