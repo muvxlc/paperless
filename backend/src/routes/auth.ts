@@ -76,9 +76,12 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     )
     .get("/thaid/login", ({ set }) => {
         try {
+            console.log("[OIDC] Initiating DOPA/ThaID login redirect...");
             const authUrl = getThaIDAuthUrl();
+            console.log("[OIDC] DOPA/ThaID Auth URL generated:", authUrl);
             set.redirect = authUrl;
         } catch (e: any) {
+            console.error("[OIDC Error] Failed to generate DOPA/ThaID Auth URL:", e);
             set.status = 500;
             return { error: e.message };
         }
@@ -159,9 +162,12 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     })
     .get("/authentik/login", ({ set }) => {
         try {
+            console.log("[OIDC] Initiating Authentik login redirect...");
             const authUrl = getAuthentikAuthUrl();
+            console.log("[OIDC] Authentik Auth URL generated:", authUrl);
             set.redirect = authUrl;
         } catch (e: any) {
+            console.error("[OIDC Error] Failed to generate Authentik Auth URL:", e);
             set.status = 500;
             return { error: e.message };
         }
