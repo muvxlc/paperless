@@ -209,10 +209,22 @@
                       <UIcon name="i-heroicons-check-circle" class="w-4 h-4 mr-1" /> Approved
                     </UBadge>
 
-                    <!-- Pending Status -->
-                    <UBadge v-else-if="doc.request_status === 'pending'" color="amber" variant="subtle" class="w-full justify-center py-1.5 text-xs font-semibold">
-                      <UIcon name="i-heroicons-clock" class="w-4 h-4 mr-1 animate-pulse" /> Requested
-                    </UBadge>
+                    <!-- Pending Status / Cancel Request -->
+                    <div v-else-if="doc.request_status === 'pending'" class="w-full flex flex-col gap-1.5">
+                      <UBadge color="amber" variant="subtle" class="w-full justify-center py-1 text-xs font-semibold">
+                        <UIcon name="i-heroicons-clock" class="w-4 h-4 mr-1 animate-pulse" /> Requested
+                      </UBadge>
+                      <UButton 
+                        block 
+                        color="red" 
+                        variant="soft"
+                        size="xs" 
+                        icon="i-heroicons-x-mark" 
+                        label="Cancel Request" 
+                        :loading="cancellingDocId === doc.id"
+                        @click="cancelRequest(doc.id)"
+                      />
+                    </div>
 
                     <!-- Rejected Status / Request Again -->
                     <div v-else-if="doc.request_status === 'rejected'" class="w-full flex flex-col gap-1.5">
@@ -277,12 +289,12 @@
                 <p class="text-xs text-gray-400 mt-1">You have not submitted any document requests yet.</p>
               </div>
 
-              <div v-else class="space-y-4">
-                <div 
-                  v-for="doc in requestDocs" 
-                  :key="doc.id" 
-                  class="flex flex-col p-4 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800 hover:shadow-xs transition-shadow duration-200 gap-4"
-                >
+               <div v-else class="space-y-4">
+                 <div 
+                   v-for="doc in requestDocs" 
+                   :key="doc.id" 
+                   class="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-800 hover:shadow-xs transition-shadow duration-200 gap-4"
+                 >
                   <div class="flex items-start gap-4 min-w-0 flex-1">
                     <div class="p-2 bg-gray-100 dark:bg-gray-800 rounded-xl text-gray-500 shrink-0">
                       <UIcon 
@@ -315,6 +327,19 @@
                         </div>
                       </div>
                     </div>
+                  </div>
+                  
+                  <!-- Cancel Request Button (If status is pending) -->
+                  <div v-if="doc.status === 'pending'" class="shrink-0 self-end sm:self-center">
+                    <UButton 
+                      color="red" 
+                      variant="soft" 
+                      size="xs" 
+                      icon="i-heroicons-x-mark" 
+                      label="Cancel Request" 
+                      :loading="cancellingDocId === doc.id"
+                      @click="cancelRequest(doc.id)"
+                    />
                   </div>
                 </div>
               </div>
@@ -374,6 +399,7 @@ const currentPage = ref(1)
 const pageSize = ref(12)
 const totalDocs = ref(0)
 const requestingDocId = ref(null)
+const cancellingDocId = ref(null)
 
 const userTabs = [
   { key: 'approved', label: 'My Approved Documents', icon: 'i-heroicons-document-check' },
@@ -487,6 +513,27 @@ async function requestAccess(docId) {
     alert('Failed to request access: ' + (err.data?.error || err.message))
   } finally {
     requestingDocId.value = null
+  }
+}
+
+// Cancel Request Action
+async function cancelRequest(docId) {
+  if (!confirm('คุณต้องการยกเลิกคำขอเข้าถึงเอกสารนี้ใช่หรือไม่?')) return
+  cancellingDocId.value = docId
+  try {
+    await $fetch(`${config.public.apiBase}/api/cancel-request/${docId}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${auth.token}` }
+    })
+    // Refresh both list and my requests history
+    await Promise.all([
+      fetchAvailableDocs(),
+      fetchMyRequests()
+    ])
+  } catch (err) {
+    alert('Failed to cancel request: ' + (err.data?.error || err.message))
+  } finally {
+    cancellingDocId.value = null
   }
 }
 

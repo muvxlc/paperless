@@ -391,7 +391,11 @@ const currentDocs = computed(() => {
 const filteredDocs = computed(() => {
   let docs = currentDocs.value
   if (selectedUser.value) {
-    docs = docs.filter(doc => doc.owner_name === selectedUser.value)
+    docs = docs.filter(doc => 
+      doc.owner_username === selectedUser.value || 
+      doc.uploader_username === selectedUser.value ||
+      doc.owner_name === selectedUser.value
+    )
   }
   if (titleSearch.value.trim() !== '') {
     const q = titleSearch.value.toLowerCase()

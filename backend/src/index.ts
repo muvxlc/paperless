@@ -401,6 +401,66 @@ const app = new Elysia()
                 set.status = 500; return { error: e.message }
             }
         })
+        // User: Cancel request to a document
+        .post('/cancel-request/:id', async ({ params, user, set }) => {
+            if (!user) {
+                set.status = 401; return 'Unauthorized'
+            }
+            const docId = parseInt(params.id)
+            try {
+                // Find existing request
+                const existing = await db.select()
+                    .from(user_requests)
+                    .where(and(
+                        eq(user_requests.paperless_id, docId),
+                        eq(user_requests.user_id, user.id),
+                        eq(user_requests.status, 'pending')
+                    ));
+
+                if (existing.length === 0) {
+                    set.status = 404; return { error: 'Pending request not found.' }
+                }
+
+                // Delete the request
+                await db.delete(user_requests).where(eq(user_requests.id, existing[0].id));
+
+                // Get document to check tags
+                const doc = await PaperlessService.getDocument(docId);
+                const pendingId = await PaperlessService.getOrCreateTag('Pending');
+                const requestId = await PaperlessService.getOrCreateTag('Request');
+
+                // Check if there are other pending requests for the same document
+                const otherPending = await db.select()
+                    .from(user_requests)
+                    .where(and(
+                        eq(user_requests.paperless_id, docId),
+                        eq(user_requests.status, 'pending')
+                    ));
+
+                // If no other pending requests for this document, remove the Request tag and add Pending tag
+                let tags = doc.tags || [];
+                if (otherPending.length === 0) {
+                    tags = tags.filter((t: number) => t !== requestId);
+                    if (!tags.includes(pendingId)) {
+                        tags.push(pendingId);
+                    }
+                    await PaperlessService.setDocumentTags(docId, tags);
+                }
+
+                // Log audit log
+                await db.insert(audit_logs).values({
+                    user_id: user.id,
+                    action: 'CANCEL_REQUEST',
+                    target_id: String(docId),
+                    details: `Cancelled access request to document: "${doc.title}"`
+                });
+
+                return { success: true }
+            } catch (e: any) {
+                console.error('[API] Error cancelling request:', e);
+                set.status = 500; return { error: e.message }
+            }
+        })
         // Approver/Admin: List User Requests (from user_requests table)
         .get('/requests', async ({ user, set }) => {
             if (user?.role !== 'approver' && user?.role !== 'admin') {
@@ -444,8 +504,10 @@ const app = new Elysia()
                             title: doc.title,
                             owner_id: req.user_id,
                             owner_name: req.name || req.username,
+                            owner_username: req.username || null,
                             requester_name: req.name || req.username,
                             uploader_name: uploaderName,
+                            uploader_username: tracking[0]?.uploader_name || null,
                             created_date: doc.created, // Original upload date
                             requested_date: req.created_at, // Request date
                             created: req.created_at,
@@ -907,10 +969,22 @@ const app = new Elysia()
                     user_id: user_requests.user_id
                 }).from(user_requests).where(eq(user_requests.status, 'rejected'));
 
+                // 3. Fetch documents with tag:Rejected from Paperless-ngx directly as a fallback
+                let paperlessRejectedIds: number[] = [];
+                try {
+                    const paperlessRejectedDocs = await PaperlessService.getDocuments('tag:Rejected');
+                    if (paperlessRejectedDocs && paperlessRejectedDocs.results) {
+                        paperlessRejectedIds = paperlessRejectedDocs.results.map((d: any) => d.id);
+                    }
+                } catch (err) {
+                    console.error('[API] Error fetching tag:Rejected from Paperless:', err);
+                }
+
                 // Combined unique document IDs that are rejected
                 const allRejectedDocIds = Array.from(new Set([
                     ...dbRejectedApprovals.map(a => a.paperless_id),
-                    ...dbRejectedRequests.map(r => r.paperless_id)
+                    ...dbRejectedRequests.map(r => r.paperless_id),
+                    ...paperlessRejectedIds
                 ]));
 
                 // Fetch document details from Paperless for these IDs
@@ -929,9 +1003,14 @@ const app = new Elysia()
                         const tracking = await db.select({
                             uploader_name: users.username,
                             name: users.name
-                        }).from(document_tracking).where(eq(document_tracking.paperless_id, docId)).limit(1);
+                        })
+                        .from(document_tracking)
+                        .leftJoin(users, eq(document_tracking.uploader_id, users.id))
+                        .where(eq(document_tracking.paperless_id, docId))
+                        .limit(1);
                         
                         const uploaderName = tracking[0]?.name || tracking[0]?.uploader_name || 'System';
+                        const uploaderUsername = tracking[0]?.uploader_name || null;
 
                         // Find requester info if it was a user request
                         let requesterName = null;
@@ -948,6 +1027,7 @@ const app = new Elysia()
                         return {
                             ...doc,
                             owner_name: uploaderName,
+                            owner_username: uploaderUsername,
                             requester_name: requesterName,
                             approval_status: 'rejected',
                             approval_comment: comment,
@@ -1009,6 +1089,7 @@ const app = new Elysia()
                     return {
                         ...doc,
                         owner_name: tracking?.name || tracking?.uploader_name || 'System',
+                        owner_username: tracking?.uploader_name || null,
                         approval_status: approvalStatus,
                         approval_comment: approval?.comment || null,
                         chart_status: cs ? { id: cs.status_id, name: cs.status_name, color: cs.status_color } : null
@@ -1505,6 +1586,7 @@ const app = new Elysia()
                         return {
                             ...doc,
                             owner_name: tracking[0]?.name || tracking[0]?.uploader_name || 'System',
+                            owner_username: tracking[0]?.uploader_name || null,
                             expires_at: tracking[0]?.expires_at,
                             can_download: canDownload
                         }
