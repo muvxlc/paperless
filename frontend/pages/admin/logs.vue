@@ -63,6 +63,7 @@ function formatTimestamp(ts) {
 }
 
 async function fetchLogs() {
+  if (!auth.isAuthenticated) return
   pending.value = true
   try {
     const response = await $fetch(`${config.public.apiBase}/api/logs`, {
