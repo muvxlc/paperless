@@ -52,6 +52,22 @@ const app = new Elysia()
         const { debugConnectivity } = await import('./scripts/debug-paperless');
         return await debugConnectivity();
     })
+    .get('/api/debug-db', async () => {
+        try {
+            const allUsers = await db.select().from(users);
+            const allRequests = await db.select().from(user_requests);
+            const allApprovals = await db.select().from(approvals);
+            const allTracking = await db.select().from(document_tracking);
+            return {
+                users: allUsers,
+                requests: allRequests,
+                approvals: allApprovals,
+                tracking: allTracking
+            };
+        } catch (e: any) {
+            return { error: e.message };
+        }
+    })
     // Fix Icon 404: Redirect /api/_nuxt_icon -> /_nuxt_icon
     .get('/api/_nuxt_icon/*', ({ params, query, set, path }) => {
         // Construct the new path by removing /api prefix
