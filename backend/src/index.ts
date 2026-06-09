@@ -513,9 +513,9 @@ const app = new Elysia()
                             request_id: req.id, // The ID of the request record itself
                             title: doc.title,
                             owner_id: req.user_id,
-                            owner_name: req.name || req.username,
+                            owner_name: req.name ? `${req.name} (${req.username})` : req.username,
                             owner_username: req.username || null,
-                            requester_name: req.name || req.username,
+                            requester_name: req.name ? `${req.name} (${req.username})` : req.username,
                             uploader_name: uploaderName,
                             uploader_username: tracking[0]?.uploader_name || null,
                             created_date: doc.created, // Original upload date
