@@ -31,6 +31,10 @@
             <UInput v-model="form.username" />
           </UFormGroup>
 
+          <UFormGroup label="Name">
+            <UInput v-model="form.name" />
+          </UFormGroup>
+
           <UFormGroup label="Password" :required="!isEditing" :help="isEditing ? 'Leave blank to keep current password' : ''">
             <UInput v-model="form.password" type="password" />
           </UFormGroup>
@@ -63,6 +67,7 @@ const form = reactive({
   id: null,
   username: '',
   password: '',
+  name: '',
   role: 'user'
 })
 
@@ -75,6 +80,7 @@ const roles = [
 const columns = [
   { key: 'id', label: 'ID' },
   { key: 'username', label: 'Username' },
+  { key: 'name', label: 'Name' },
   { key: 'role', label: 'Role' },
   { key: 'actions', label: 'Actions' }
 ]
@@ -109,12 +115,14 @@ function openModal(user = null) {
     form.id = user.id
     form.username = user.username
     form.password = '' // Don't show hash
+    form.name = user.name || ''
     form.role = user.role
   } else {
     isEditing.value = false
     form.id = null
     form.username = ''
     form.password = ''
+    form.name = ''
     form.role = 'user'
   }
   isOpen.value = true
@@ -132,13 +140,13 @@ async function saveUser() {
       await $fetch(`${config.public.apiBase}/api/users/${form.id}`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${auth.token}` },
-        body: { username: form.username, password: form.password || undefined, role: form.role }
+        body: { username: form.username, password: form.password || undefined, name: form.name, role: form.role }
       })
     } else {
       await $fetch(`${config.public.apiBase}/api/users`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${auth.token}` },
-        body: { username: form.username, password: form.password, role: form.role }
+        body: { username: form.username, password: form.password, name: form.name, role: form.role }
       })
     }
     isOpen.value = false
