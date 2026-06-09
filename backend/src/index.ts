@@ -32,6 +32,97 @@ async function sendDiscordNotification(webhookUrl: string | null, message: strin
     }
 }
 
+// Memory queues for debouncing request and cancel notifications by user
+const pendingRequestNotifications = new Map<number, { 
+    userId: number; 
+    requesterName: string; 
+    docTitles: string[]; 
+    timer: any;
+    webhooks: string[];
+}>();
+
+const pendingCancelNotifications = new Map<number, { 
+    userId: number; 
+    requesterName: string; 
+    docTitles: string[]; 
+    timer: any;
+    webhooks: string[];
+}>();
+
+function queueRequestNotification(userId: number, requesterName: string, docTitle: string, webhooks: string[]) {
+    let pending = pendingRequestNotifications.get(userId);
+    if (!pending) {
+        pending = {
+            userId,
+            requesterName,
+            docTitles: [],
+            timer: null,
+            webhooks
+        };
+        pendingRequestNotifications.set(userId, pending);
+    }
+    
+    if (!pending.docTitles.includes(docTitle)) {
+        pending.docTitles.push(docTitle);
+    }
+    
+    if (pending.timer) {
+        clearTimeout(pending.timer);
+    }
+    
+    pending.timer = setTimeout(async () => {
+        const docList = pending!.docTitles.map(t => `- **"${t}"**`).join('\n');
+        let message = '';
+        if (pending!.docTitles.length === 1) {
+            message = `🔔 **New Document Request**\nUser **${pending!.requesterName}** has requested access to document:\n- **"${pending!.docTitles[0]}"**`;
+        } else {
+            message = `🔔 **New Document Requests (${pending!.docTitles.length} files)**\nUser **${pending!.requesterName}** has requested access to the following documents:\n${docList}`;
+        }
+        
+        for (const url of pending!.webhooks) {
+            sendDiscordNotification(url, message);
+        }
+        pendingRequestNotifications.delete(userId);
+    }, 2000);
+}
+
+function queueCancelNotification(userId: number, requesterName: string, docTitle: string, webhooks: string[]) {
+    let pending = pendingCancelNotifications.get(userId);
+    if (!pending) {
+        pending = {
+            userId,
+            requesterName,
+            docTitles: [],
+            timer: null,
+            webhooks
+        };
+        pendingCancelNotifications.set(userId, pending);
+    }
+    
+    if (!pending.docTitles.includes(docTitle)) {
+        pending.docTitles.push(docTitle);
+    }
+    
+    if (pending.timer) {
+        clearTimeout(pending.timer);
+    }
+    
+    pending.timer = setTimeout(async () => {
+        const docList = pending!.docTitles.map(t => `- **"${t}"**`).join('\n');
+        let message = '';
+        if (pending!.docTitles.length === 1) {
+            message = `⚠️ **Request Cancelled**\nUser **${pending!.requesterName}** has cancelled their access request for document:\n- **"${pending!.docTitles[0]}"**`;
+        } else {
+            message = `⚠️ **Requests Cancelled (${pending!.docTitles.length} files)**\nUser **${pending!.requesterName}** has cancelled access requests for the following documents:\n${docList}`;
+        }
+        
+        for (const url of pending!.webhooks) {
+            sendDiscordNotification(url, message);
+        }
+        pendingCancelNotifications.delete(userId);
+    }, 2000);
+}
+
 const app = new Elysia()
     .use(cors({
         origin: true, // Allow all origins (or specify 'https://paperless.bangkhan.com')
@@ -421,12 +512,9 @@ const app = new Elysia()
                         ? `${requester[0].name} (${requester[0].username})` 
                         : (requester[0]?.username || user.username);
 
-                    const message = `🔔 **New Document Request**\nUser **${requesterName}** has requested access to document: **"${doc.title}"**`;
-                    
-                    for (const nu of notifyUsers) {
-                        if (nu.discord_webhook) {
-                            sendDiscordNotification(nu.discord_webhook, message);
-                        }
+                    const webhookUrls = notifyUsers.map(nu => nu.discord_webhook).filter(Boolean) as string[];
+                    if (webhookUrls.length > 0) {
+                        queueRequestNotification(user.id, requesterName, doc.title, webhookUrls);
                     }
                 } catch (err) {
                     console.error('[API] Error sending request-access Discord notification:', err);
@@ -501,6 +589,36 @@ const app = new Elysia()
                     target_id: String(docId),
                     details: `Cancelled access request to document: "${docTitle}"`
                 });
+
+                // Notify Admins/Approvers with Discord webhooks
+                try {
+                    const notifyUsers = await db.select({ discord_webhook: users.discord_webhook })
+                        .from(users)
+                        .where(and(
+                            or(eq(users.role, 'admin'), eq(users.role, 'approver')),
+                            isNotNull(users.discord_webhook)
+                        ));
+                    
+                    const requester = await db.select({
+                        name: users.name,
+                        username: users.username
+                    })
+                    .from(users)
+                    .where(eq(users.id, user.id))
+                    .limit(1);
+
+                    const requesterName = requester[0]?.name 
+                        ? `${requester[0].name} (${requester[0].username})` 
+                        : (requester[0]?.username || user.username);
+
+                    const webhookUrls = notifyUsers.map(nu => nu.discord_webhook).filter(Boolean) as string[];
+
+                    if (webhookUrls.length > 0) {
+                        queueCancelNotification(user.id, requesterName, docTitle, webhookUrls);
+                    }
+                } catch (err) {
+                    console.error('[API] Error sending cancel-request Discord notification:', err);
+                }
 
                 return { success: true }
             } catch (e: any) {
