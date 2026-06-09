@@ -15,7 +15,7 @@
             aria-label="Open menu"
           />
           <div class="flex items-center gap-2">
-            <span class="text-xl">👋</span>
+            <span class="text-xl">📄</span>
             <span class="text-lg font-bold text-orange-500 tracking-tight">Paperless</span>
           </div>
         </div>
@@ -41,7 +41,7 @@
         <div class="space-y-8">
           <!-- Brand -->
           <div class="flex items-center gap-2 pl-2">
-            <span class="text-2xl">👋</span>
+            <span class="text-2xl">📄</span>
             <span class="text-xl font-bold text-orange-500 tracking-tight">Paperless</span>
           </div>
           
@@ -101,7 +101,7 @@
           <div class="space-y-8">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
-                <span class="text-2xl">👋</span>
+                <span class="text-2xl">📄</span>
                 <span class="text-xl font-bold text-orange-500 tracking-tight">Paperless</span>
               </div>
               <UButton
