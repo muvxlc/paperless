@@ -13,7 +13,7 @@ export const getFrontendUrl = (requestHeaders: Record<string, string>) => {
 };
 
 // --- ThaID Integration ---
-export const getThaIDAuthUrl = () => {
+export const getThaIDAuthUrl = (state: string) => {
   const baseUrl = process.env.THAID_BASE_URL || 'https://imauth.bora.dopa.go.th/api/v2/oauth2/auth/';
   const clientId = process.env.THAID_CLIENT_ID;
   const redirectUri = process.env.THAID_CALLBACK_URL || process.env.THAID_REDIRECT_URI;
@@ -27,7 +27,7 @@ export const getThaIDAuthUrl = () => {
     client_id: clientId,
     redirect_uri: redirectUri,
     scope: process.env.THAID_SCOPE || 'openid pid name',
-    state: 'thaid_login' 
+    state 
   });
 
   return `${baseUrl}?${params.toString()}`;
@@ -83,7 +83,7 @@ export const getThaIDUserInfo = async (accessToken: string) => {
 };
 
 // --- Authentik Integration ---
-export const getAuthentikAuthUrl = () => {
+export const getAuthentikAuthUrl = (state: string) => {
   const baseUrl = process.env.AUTHENTIK_BASE_URL; // https://auth.bangkhan.com
   const clientId = process.env.AUTHENTIK_CLIENT_ID;
   const redirectUri = process.env.AUTHENTIK_CALLBACK_URL;
@@ -97,7 +97,7 @@ export const getAuthentikAuthUrl = () => {
     client_id: clientId,
     redirect_uri: redirectUri,
     scope: 'openid profile email',
-    state: 'authentik_login' 
+    state 
   });
 
   return `${baseUrl}/application/o/authorize/?${params.toString()}`;
