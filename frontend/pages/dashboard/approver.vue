@@ -105,15 +105,33 @@
                       </UBadge>
                     </div>
                     <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-gray-500 mt-2">
+                      <!-- Uploader (Always display, but styled slightly differently on requests tab) -->
                       <span class="flex items-center gap-1">
-                        <UIcon name="i-heroicons-user" class="w-3.5 h-3.5" />
-                        <span>{{ item.key === 'requests' ? 'Requested by' : 'Uploaded by' }}:</span>
-                        <span class="font-semibold text-orange-500">{{ doc.owner_name || 'System' }}</span>
+                        <UIcon name="i-heroicons-arrow-up-tray" class="w-3.5 h-3.5" />
+                        <span>Uploaded by:</span>
+                        <span class="font-semibold text-gray-700 dark:text-gray-300">{{ item.key === 'requests' ? doc.uploader_name : (doc.owner_name || 'System') }}</span>
                       </span>
+
+                      <!-- Requester (Only display on requests tab, highlighted in orange) -->
+                      <span v-if="item.key === 'requests'" class="flex items-center gap-1.5 bg-orange-50 dark:bg-orange-950/20 px-2 py-0.5 rounded-lg border border-orange-100 dark:border-orange-900/30">
+                        <UIcon name="i-heroicons-user" class="w-3.5 h-3.5 text-orange-500" />
+                        <span class="text-orange-600 dark:text-orange-400 font-medium">Requested by:</span>
+                        <span class="font-bold text-orange-700 dark:text-orange-300">{{ doc.requester_name || 'Unknown' }}</span>
+                      </span>
+
                       <span>&bull;</span>
+                      
+                      <!-- Upload Date -->
                       <span class="flex items-center gap-1">
                         <UIcon name="i-heroicons-calendar" class="w-3.5 h-3.5" />
                         Uploaded: {{ formatTimestamp(doc.created_date || doc.created) }}
+                      </span>
+
+                      <!-- Request Date -->
+                      <span v-if="item.key === 'requests' && doc.requested_date" class="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                        <span>&bull;</span>
+                        <UIcon name="i-heroicons-clock" class="w-3.5 h-3.5" />
+                        Requested: {{ formatTimestamp(doc.requested_date) }}
                       </span>
                       <span v-if="doc.expires_at" class="flex items-center gap-1 text-red-500">
                         <span>&bull;</span>

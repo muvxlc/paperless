@@ -423,13 +423,29 @@ const app = new Elysia()
                 const enrichedResults = await Promise.all(pendingRequests.map(async (req: any) => {
                     try {
                         const doc = await PaperlessService.getDocument(req.paperless_id);
+                        
+                        // Find uploader info from document_tracking table
+                        const tracking = await db.select({
+                            uploader_name: users.username,
+                            name: users.name
+                        })
+                        .from(document_tracking)
+                        .leftJoin(users, eq(document_tracking.uploader_id, users.id))
+                        .where(eq(document_tracking.paperless_id, doc.id))
+                        .limit(1);
+
+                        const uploaderName = tracking[0]?.name || tracking[0]?.uploader_name || 'System';
+
                         return {
                             id: doc.id, // Keep the document ID as key for viewing/downloading
                             request_id: req.id, // The ID of the request record itself
                             title: doc.title,
                             owner_id: req.user_id,
                             owner_name: req.name ? `${req.name} (${req.username})` : req.username,
-                            created_date: req.created_at,
+                            requester_name: req.name ? `${req.name} (${req.username})` : req.username,
+                            uploader_name: uploaderName,
+                            created_date: doc.created, // Original upload date
+                            requested_date: req.created_at, // Request date
                             created: req.created_at,
                             tags: doc.tags || []
                         }
@@ -876,8 +892,7 @@ const app = new Elysia()
                 set.status = 403; return 'Forbidden'
             }
             try {
-                const rejectedId = await PaperlessService.getOrCreateTag('Rejected');
-                const docs = await PaperlessService.getDocumentsByTag(rejectedId);
+                const docs = await PaperlessService.getDocuments('tag:Rejected');
 
                 // Enrich with uploader info if possible (similar to /api/pending)
                 // Assuming logic is similar to /pending

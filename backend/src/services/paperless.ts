@@ -78,7 +78,10 @@ export const PaperlessService = {
 
     // Get documents (can filter by query)
     async getDocuments(query: string = '') {
-        const response = await fetch(`${PAPERLESS_API_URL}/documents/?query=${encodeURIComponent(query)}`, {
+        const url = query.trim() !== ''
+            ? `${PAPERLESS_API_URL}/documents/?query=${encodeURIComponent(query)}`
+            : `${PAPERLESS_API_URL}/documents/`;
+        const response = await fetch(url, {
             headers: getHeaders(),
         });
         if (!response.ok) {
