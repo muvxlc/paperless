@@ -69,6 +69,49 @@ const app = new Elysia()
                 return 'Unauthorized'
             }
         })
+        // System status (Admin Only)
+        .get('/status', async ({ user, set }) => {
+            if (user?.role !== 'admin') {
+                set.status = 403
+                return 'Forbidden'
+            }
+
+            let dbStatus = 'inactive'
+            try {
+                await db.execute(sql`SELECT 1`)
+                dbStatus = 'active'
+            } catch (e) {
+                console.error('[Status Check] Database check failed:', e)
+            }
+
+            let paperlessStatus = 'inactive'
+            try {
+                const headers: Record<string, string> = {}
+                const token = process.env.PAPERLESS_API_TOKEN
+                const username = process.env.PAPERLESS_USERNAME
+                const password = process.env.PAPERLESS_PASSWORD
+                if (token && token.trim() !== '' && !token.includes('YOUR_')) {
+                    headers['Authorization'] = `Token ${token}`
+                } else if (username && password) {
+                    const credentials = btoa(`${username}:${password}`)
+                    headers['Authorization'] = `Basic ${credentials}`
+                }
+                const response = await fetch(`${process.env.PAPERLESS_API_URL || 'http://paperless-ngx:8000/api'}/`, {
+                    headers
+                })
+                if (response.ok) {
+                    paperlessStatus = 'active'
+                }
+            } catch (e) {
+                console.error('[Status Check] Paperless check failed:', e)
+            }
+
+            return {
+                server: 'active',
+                database: dbStatus,
+                paperless: paperlessStatus
+            }
+        })
         // Staff: Upload
         .post('/upload', async ({ body, user, set }) => {
             if (user?.role !== 'staff' && user?.role !== 'admin') {
